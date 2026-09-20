@@ -425,26 +425,21 @@ function paintHome() {
   let due = 0;
   let fresh = 0;
   let wrong = 0;
+  let learned = 0;
   for (const q of b.questions) {
     const st = S.qstate.get(q.id);
     if (!st) fresh++;
     else if (st.due !== null && st.due <= now) due++;
     if (st && st.history.includes('x')) wrong++;
+    if (Schedule.known(st)) learned++;
   }
-  // The goal names one question per place. That is the one the count follows.
-  const core = b.core_facet;
-  const ready = b.items.filter((it) => {
-    const fwd = b.questions.filter((q) => q.item === it.id && q.kind === 'fwd');
-    if (!fwd.length) return false;
-    const wanted = core ? fwd.filter((q) => q.facet === core) : fwd;
-    if (!wanted.length) return false;
-    return wanted.every((q) => Schedule.known(S.qstate.get(q.id)));
-  }).length;
 
+  // Questions, not a claim about what the learner can now say. The same three
+  // numbers mean the same thing whether the set is places, songs or terms.
   const rows = [
-    ['違いが分かった場所', `${ready}<span class="unit"> / ${b.items.length}</span>`],
-    ['復習が来ている問題', `${due}<span class="unit"> 問</span>`],
-    ['まだ出ていない問題', `${fresh}<span class="unit"> 問</span>`],
+    ['おぼえた問題', `${learned}<span class="unit"> / ${b.questions.length}</span>`],
+    ['復習の問題', `${due}<span class="unit"> 問</span>`],
+    ['はじめての問題', `${fresh}<span class="unit"> 問</span>`],
   ];
   $('home-stats').innerHTML = rows
     .map(([k, v]) => `<div class="stat"><span class="stat-label">${k}</span><span class="stat-value">${v}</span></div>`)
@@ -607,6 +602,9 @@ function finish() {
 
 function paintBrowse() {
   const b = S.bank;
+  const label = b.item_label || '項目';
+  $('browse-title').textContent = `${label}の一覧`;
+  $('btn-browse').textContent = `${label}の一覧`;
   const order = { pref: 0, town: 1, spot: 2 };
   const items = b.items.slice().sort((x, y) => (order[x.type] ?? 9) - (order[y.type] ?? 9));
   const frag = document.createDocumentFragment();
