@@ -442,7 +442,7 @@ function paintHome() {
   }).length;
 
   const rows = [
-    ['違いを言える場所', `${ready}<span class="unit"> / ${b.items.length}</span>`],
+    ['違いが分かった場所', `${ready}<span class="unit"> / ${b.items.length}</span>`],
     ['復習が来ている問題', `${due}<span class="unit"> 問</span>`],
     ['まだ出ていない問題', `${fresh}<span class="unit"> 問</span>`],
   ];
