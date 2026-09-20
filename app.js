@@ -30,6 +30,7 @@ const S = {
   session: null,
   mode: 'remote',   // 'remote' (GitHub) or 'local' (bank.json next to the page)
   syncing: false,
+  pushAgain: false,
   dirty: false,
   lastSyncError: '',
 };
@@ -271,19 +272,33 @@ async function pullRemoteEvents() {
   S.remote = out;
 }
 
+/** Send this device's answers.
+ *
+ *  An answer given while a send is already in flight is not in that request.
+ *  The count that went out is compared with the count now, and a follow-up runs
+ *  instead of marking everything saved. Without that, an answer given during a
+ *  send would sit on the device while the page said it was saved, which is the
+ *  one thing the page must never say.
+ */
 async function pushEvents() {
-  if (S.mode === 'local' || S.syncing || !S.dirty) return;
+  if (S.mode === 'local' || !S.dirty) return;
+  if (S.syncing) {
+    S.pushAgain = true;
+    return;
+  }
   S.syncing = true;
+  S.pushAgain = false;
   const domain = S.cfg.domain;
   const path = `domains/${domain}/events/device-${deviceId()}.json`;
-  const body = {
-    device: deviceId(),
-    domain: domain,
-    updated: nowIso(),
-    events: S.events,
-  };
   try {
     for (let attempt = 0; attempt < 2; attempt++) {
+      const sent = S.events.length;
+      const body = {
+        device: deviceId(),
+        domain: domain,
+        updated: nowIso(),
+        events: S.events.slice(0, sent),
+      };
       const sha = readLS(LS.sha + domain, null);
       const payload = {
         message: `answers from ${deviceId()}`,
@@ -294,12 +309,12 @@ async function pushEvents() {
       if (res.ok) {
         const out = await res.json();
         writeLS(LS.sha + domain, out.content.sha);
-        S.dirty = false;
         S.lastSyncError = '';
+        S.dirty = S.events.length > sent;
         return;
       }
       if (res.status === 409 || res.status === 422) {
-        // someone else wrote this file; take their events in and try once more
+        // another tab wrote this file; take its answers in and try once more
         const cur = await api(path);
         if (cur.ok) {
           const meta = await cur.json();
@@ -308,8 +323,7 @@ async function pushEvents() {
             const theirs = JSON.parse(b64decode(meta.content)).events || [];
             const ids = new Set(S.events.map((e) => e.id));
             for (const e of theirs) if (e && e.id && !ids.has(e.id)) S.events.push(e);
-            S.events.sort((a, b) => (a.ts < b.ts ? -1 : 1));
-            body.events = S.events;
+            S.events.sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : a.id < b.id ? -1 : 1));
             saveLocalEvents();
           } catch (e) { /* keep ours */ }
           continue;
@@ -323,6 +337,10 @@ async function pushEvents() {
   } finally {
     S.syncing = false;
     paintSyncNote();
+    if (S.dirty || S.pushAgain) {
+      S.pushAgain = false;
+      setTimeout(pushEvents, S.lastSyncError ? 15000 : 250);
+    }
   }
 }
 
