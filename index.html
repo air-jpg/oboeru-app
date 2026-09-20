@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>おぼえる</title>
+<meta name="description" content="旅の前に、行く場所のことを覚えておくための出題アプリ">
+<meta name="theme-color" content="#F5F3EE" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141414" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="おぼえる">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<div id="app" hidden>
+
+  <!-- 設定 -->
+  <section class="screen" id="screen-setup">
+    <div class="pad">
+      <h1 class="title">はじめの設定</h1>
+      <p class="lead">学習の記録を置く GitHub リポジトリと、読み書きのためのトークンを登録します。登録はこの端末のブラウザの中だけに残ります。</p>
+      <label class="field">
+        <span class="field-label">リポジトリ</span>
+        <input id="in-repo" type="text" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="owner/repo">
+      </label>
+      <label class="field">
+        <span class="field-label">アクセストークン</span>
+        <input id="in-token" type="password" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="github_pat_...">
+        <span class="field-note">対象をこのリポジトリだけにした細粒度トークン。権限は Contents の読み書き。</span>
+      </label>
+      <label class="field">
+        <span class="field-label">学習セット</span>
+        <input id="in-domain" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="hokuriku-2026-09">
+      </label>
+      <p class="msg" id="setup-msg" role="status"></p>
+      <button class="btn btn-primary" id="btn-save-setup">保存して読み込む</button>
+    </div>
+  </section>
+
+  <!-- ホーム -->
+  <section class="screen" id="screen-home">
+    <div class="pad">
+      <p class="eyebrow" id="home-eyebrow"></p>
+      <h1 class="title serif" id="home-title">おぼえる</h1>
+      <p class="lead" id="home-goal"></p>
+
+      <div class="stats" id="home-stats"></div>
+
+      <button class="btn btn-primary" id="btn-start"></button>
+      <button class="btn btn-quiet" id="btn-weak" hidden>間違えた問題だけ</button>
+
+      <p class="msg" id="home-msg" role="status"></p>
+
+      <nav class="home-links">
+        <button class="linkbtn" id="btn-browse">場所の一覧</button>
+        <button class="linkbtn" id="btn-settings">設定</button>
+      </nav>
+    </div>
+  </section>
+
+  <!-- 出題 -->
+  <section class="screen" id="screen-quiz">
+    <header class="qhead">
+      <button class="iconbtn" id="btn-quit" aria-label="中断する">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+      <span class="counter" id="q-counter">1 / 1</span>
+      <span class="iconbtn-spacer"></span>
+    </header>
+    <div class="progress"><div class="progress-fill" id="q-progress"></div></div>
+
+    <div class="qbody">
+      <p class="eyebrow" id="q-eyebrow"></p>
+      <h2 class="question" id="q-prompt"></h2>
+      <div class="choices" id="q-choices" role="group" aria-label="選択肢"></div>
+      <button class="linkbtn linkbtn-center" id="btn-dunno">わからない</button>
+    </div>
+
+    <div class="verdict" id="q-verdict" hidden>
+      <div class="verdict-inner">
+        <p class="verdict-head" id="v-head"></p>
+        <p class="verdict-answer" id="v-answer" hidden></p>
+        <p class="verdict-text" id="v-text"></p>
+        <p class="verdict-note" id="v-note" hidden></p>
+        <button class="btn btn-primary" id="btn-next">次へ</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 結果 -->
+  <section class="screen" id="screen-result">
+    <div class="pad">
+      <p class="eyebrow">おつかれさまでした</p>
+      <h1 class="title serif" id="r-score"></h1>
+      <p class="lead" id="r-note"></p>
+      <ul class="recap" id="r-recap"></ul>
+      <button class="btn btn-primary" id="btn-again">続ける</button>
+      <button class="btn btn-quiet" id="btn-home">ホームに戻る</button>
+      <p class="msg" id="r-msg" role="status"></p>
+    </div>
+  </section>
+
+  <!-- 一覧 -->
+  <section class="screen" id="screen-browse">
+    <header class="qhead">
+      <button class="iconbtn" id="btn-browse-back" aria-label="戻る">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+      </button>
+      <span class="counter">場所の一覧</span>
+      <span class="iconbtn-spacer"></span>
+    </header>
+    <div class="pad" id="browse-list"></div>
+  </section>
+
+</div>
+
+<noscript><p style="padding:24px">このページは JavaScript が必要です。</p></noscript>
+<script src="schedule.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
