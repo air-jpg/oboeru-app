@@ -644,8 +644,20 @@ function paintBrowse() {
 
 /* ---------- boot ---------- */
 
+/** A link can carry the repository and the set so only the token has to be
+ *  typed on a phone. The token itself never goes in a URL. */
+function prefillFromHash() {
+  const h = location.hash.replace(/^#/, '');
+  if (!h) return null;
+  const p = new URLSearchParams(h);
+  const repo = p.get('repo');
+  const domain = p.get('domain');
+  if (!repo && !domain) return null;
+  return { repo: repo || '', domain: domain || '', token: '' };
+}
+
 function paintSetup() {
-  const cfg = S.cfg || {};
+  const cfg = S.cfg || prefillFromHash() || {};
   $('in-repo').value = cfg.repo || '';
   $('in-token').value = cfg.token || '';
   $('in-domain').value = cfg.domain || '';
@@ -708,6 +720,7 @@ async function boot() {
   if (!S.cfg || !S.cfg.repo || !S.cfg.token || !S.cfg.domain) {
     paintSetup();
     show('setup');
+    $('in-token').focus({ preventScroll: true });
     return;
   }
   await loadAndShow();
