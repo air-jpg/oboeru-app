@@ -184,8 +184,7 @@ function buildQueue(opts) {
  *  which a learner who has never met any of them cannot do. */
 function unlocked(q) {
   if (!q.after) return true;
-  const st = S.qstate.get(q.after);
-  return !!st && st.box >= READY_BOX;
+  return Schedule.known(S.qstate.get(q.after));
 }
 
 /** Avoid two questions about the same place back to back. */
@@ -439,10 +438,7 @@ function paintHome() {
     if (!fwd.length) return false;
     const wanted = core ? fwd.filter((q) => q.facet === core) : fwd;
     if (!wanted.length) return false;
-    return wanted.every((q) => {
-      const st = S.qstate.get(q.id);
-      return st && st.box >= READY_BOX;
-    });
+    return wanted.every((q) => Schedule.known(S.qstate.get(q.id)));
   }).length;
 
   const rows = [
@@ -616,14 +612,11 @@ function paintBrowse() {
   const frag = document.createDocumentFragment();
   for (const it of items) {
     const fwd = b.questions.filter((q) => q.item === it.id && q.kind === 'fwd');
-    const done = fwd.filter((q) => {
-      const st = S.qstate.get(q.id);
-      return st && st.box >= READY_BOX;
-    }).length;
+    const done = fwd.filter((q) => Schedule.known(S.qstate.get(q.id))).length;
     const div = document.createElement('div');
     div.className = 'place';
     const h = document.createElement('h3');
-    h.textContent = it.name;
+    h.textContent = it.short_name || it.name;
     const bar = document.createElement('span');
     bar.className = 'bar';
     bar.textContent = fwd.length ? `${done} / ${fwd.length}` : '';

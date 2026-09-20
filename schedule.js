@@ -8,10 +8,19 @@
  * Rule
  *   boxes 0..N
  *   correct -> next box, due = answered_at + gap(box)
- *   wrong   -> box 0, due = answered_at (come back to it in this sitting)
+ *   wrong   -> down one box, or two from box 4 up, and due right away so it
+ *              comes back in this sitting
  *   a correct answer given before the card was due does not move it up once it
  *   has reached box 2; repeating a card minutes after getting it right is not
  *   evidence that it will still be there tomorrow
+ *
+ * Why the fall is not all the way down
+ *   WaniKani drops a card by one step below its fifth stage and by two above
+ *   it, never past the first. Missing a card that was on a three week gap says
+ *   the gap had grown too long, not that the card is new. Sending it back to
+ *   the start throws away every correct answer before it, which on a deadline
+ *   is time there is none of. Since a wrong answer also sets the card due at
+ *   once, it still comes back within the same sitting either way.
  *
  * The gap
  *   With a deadline ahead, the gap is a fraction of the time left rather than
@@ -33,6 +42,7 @@
   'use strict';
 
   const READY_BOX = 2;
+  const BIG_FALL_FROM = 4;   // at this box and above, a miss costs two steps
   const DEFAULT_INTERVALS = [0, 10, 1440, 4320, 10080, 30240];
   const DEFAULT_FRACTIONS = [0, 0.02, 0.06, 0.15, 0.30, 0.30];
   const MIN_GAP_MINUTES = 10;
@@ -52,7 +62,7 @@
   }
 
   function blank() {
-    return { box: 0, due: null, seen: 0, correct: 0, lastTs: 0, history: '' };
+    return { box: 0, due: null, seen: 0, correct: 0, lastCorrect: null, lastTs: 0, history: '' };
   }
 
   /** Fold one answer into a card's state. tsMs is when it was answered. */
@@ -67,14 +77,22 @@
         st.due = tsMs + gapMinutes(st.box, tsMs, ivs, deadlineMs, fractions) * 60000;
       }
     } else {
-      st.box = 0;
+      st.box = Math.max(0, st.box - (st.box >= BIG_FALL_FROM ? 2 : 1));
       st.due = tsMs;
     }
     st.seen += 1;
     st.correct += correct ? 1 : 0;
+    st.lastCorrect = correct;
     st.lastTs = tsMs;
     st.history = (st.history + (correct ? 'o' : 'x')).slice(-10);
     return st;
+  }
+
+  /** A card counts as known when it has climbed far enough AND the last answer
+   *  was right. Without the second half, a card missed from a high box would
+   *  still be counted, because one miss no longer sends it to the bottom. */
+  function known(st) {
+    return !!st && st.box >= READY_BOX && st.lastCorrect === true;
   }
 
   /** Replay a whole event list. Returns a plain object keyed by question id. */
@@ -95,5 +113,6 @@
     return out;
   }
 
-  return { READY_BOX, DEFAULT_INTERVALS, DEFAULT_FRACTIONS, gapMinutes, blank, apply, replay };
+  return { READY_BOX, BIG_FALL_FROM, DEFAULT_INTERVALS, DEFAULT_FRACTIONS,
+           gapMinutes, blank, apply, known, replay };
 });
