@@ -644,6 +644,19 @@ function paintBrowse() {
       p.textContent = it.hitokoto;
       div.appendChild(p);
     }
+    if (it.links && it.links.length) {
+      const nav = document.createElement('p');
+      nav.className = 'links';
+      for (const l of it.links) {
+        const a = document.createElement('a');
+        a.href = l.url;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        a.textContent = l.title;
+        nav.appendChild(a);
+      }
+      div.appendChild(nav);
+    }
     frag.appendChild(div);
   }
   const host = $('browse-list');

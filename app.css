@@ -358,4 +358,14 @@ input:focus-visible {
 .place dt { font-size: 13px; color: var(--text-3); margin-top: 8px; }
 .place dd { margin: 2px 0 0; font-size: 15px; line-height: 1.6; }
 .place .one { margin: 10px 0 0; font-size: 15px; line-height: 1.6; color: var(--text-2); }
+.place .links { margin: 10px 0 0; display: flex; flex-wrap: wrap; gap: 14px; }
+.place .links a {
+  font-size: 13px;
+  color: var(--text-3);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+}
 .place .bar { display: inline-block; margin-left: 8px; font-size: 13px; color: var(--text-3); font-weight: 400; }
