@@ -7,8 +7,8 @@
  * max-age and without that the browser hands the worker a stale copy: the page
  * would come back new while its script stayed old, which is worse than either.
  */
-const CACHE = 'obo-4863acbd';
-const SHELL = ['./', 'index.html', 'app.css?v=4863acbd', 'app.js?v=4863acbd', 'schedule.js?v=4863acbd',
+const CACHE = 'obo-cf799ce5';
+const SHELL = ['./', 'index.html', 'app.css?v=cf799ce5', 'app.js?v=cf799ce5', 'schedule.js?v=cf799ce5',
                'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-180.png'];
 
 self.addEventListener('install', (e) => {

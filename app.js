@@ -16,6 +16,8 @@ const LS = {
   events: 'obo.events.',
   sha: 'obo.sha.',
   device: 'obo.device',
+  dirty: 'obo.dirty.',
+  sets: 'obo.sets',
 };
 
 const READY_BOX = Schedule.READY_BOX;
@@ -310,6 +312,7 @@ async function pushEvents() {
         writeLS(LS.sha + domain, out.content.sha);
         S.lastSyncError = '';
         S.dirty = S.events.length > sent;
+        writeLS(LS.dirty + domain, S.dirty);
         return;
       }
       if (res.status === 409 || res.status === 422) {
@@ -371,6 +374,7 @@ function record(q, chosen, correct, dunno, ms) {
   S.events.push(ev);
   saveLocalEvents();
   S.dirty = true;
+  writeLS(LS.dirty + S.cfg.domain, true);
   let st = S.qstate.get(q.id);
   if (!st) {
     st = Schedule.blank();
@@ -418,6 +422,8 @@ function fmtDeadline() {
 function paintHome() {
   const b = S.bank;
   $('home-title').textContent = b.short_title || b.title;
+  $('btn-browse').textContent = `${b.item_label || '項目'}の一覧`;
+  $('btn-sets').hidden = S.mode !== 'remote';
   $('home-eyebrow').textContent = fmtDeadline();
   $('home-goal').textContent = b.goal || '';
 
@@ -550,9 +556,17 @@ function answer(opt, btn) {
   // (Marsh et al. 2007), so the wrong pairing is named and undone on the spot.
   const note = $('v-note');
   let extra = '';
-  if (!correct && opt && opt.item && opt.item !== q.item && opt.item_name) {
-    extra = `選んだ「${opt.text}」は${opt.item_name}のこと。`;
-  } else if (q.hitokoto && q.facet === 'difference') {
+  if (!correct && opt && opt.item && opt.item !== q.item) {
+    if (q.kind === 'rev') {
+      // the choice was an item; say what that item really is on this facet
+      const owner = S.bank.items.find((x) => x.id === opt.item);
+      const val = owner && owner.facets && owner.facets[q.facet] && owner.facets[q.facet].answer;
+      if (val) extra = `選んだ ${opt.text} は「${val}」。`;
+    } else if (opt.item_name) {
+      const sp = /^[A-Za-z]/.test(opt.item_name) ? ' ' : '';
+      extra = `選んだ「${opt.text}」は${sp}${opt.item_name}${sp}のこと。`;
+    }
+  } else if (q.hitokoto && q.facet === (S.bank.core_facet || 'difference')) {
     extra = q.hitokoto;
   }
   note.hidden = !extra;
@@ -584,7 +598,8 @@ function finish() {
       const li = document.createElement('li');
       const who = document.createElement('span');
       who.className = 'who';
-      who.textContent = a.q.item_name;
+      const full = S.bank.items.find((x) => x.id === a.q.item);
+      who.textContent = (full && full.name) || a.q.item_name;
       const what = document.createElement('span');
       what.className = 'what';
       what.textContent = ` ${a.q.answer}`;
@@ -605,7 +620,8 @@ function paintBrowse() {
   const label = b.item_label || '項目';
   $('browse-title').textContent = `${label}の一覧`;
   $('btn-browse').textContent = `${label}の一覧`;
-  const order = { pref: 0, town: 1, spot: 2 };
+  const order = {};
+  Object.keys(b.type_labels || {}).forEach((t, i) => { order[t] = i; });
   const items = b.items.slice().sort((x, y) => (order[x.type] ?? 9) - (order[y.type] ?? 9));
   const frag = document.createDocumentFragment();
   for (const it of items) {
@@ -678,6 +694,77 @@ function prefillFromHash() {
   return { repo: repo || '', domain: domain || '', token: '' };
 }
 
+/* ---------- sets ---------- */
+
+async function fetchSetIndex() {
+  const res = await api('domains/index.json', {
+    headers: { Accept: 'application/vnd.github.raw+json' },
+  });
+  if (!res.ok) throw new Error(await describe(res));
+  const body = await res.json();
+  return body.sets || [];
+}
+
+async function paintSets() {
+  const host = $('sets-list');
+  const msg = $('sets-msg');
+  host.innerHTML = '';
+  msg.textContent = '読み込んでいます';
+  msg.dataset.tone = '';
+  let sets;
+  try {
+    sets = await fetchSetIndex();
+    writeLS(LS.sets, sets);
+  } catch (e) {
+    sets = readLS(LS.sets, []) || [];
+    if (!sets.length) {
+      msg.textContent = e.message || String(e);
+      msg.dataset.tone = 'bad';
+      return;
+    }
+  }
+  msg.textContent = '';
+  for (const set of sets) {
+    const current = set.id === S.cfg.domain;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'choice setrow';
+    if (current) btn.dataset.current = '1';
+    btn.innerHTML = '<span class="label"><span class="set-title"></span><span class="set-goal"></span></span>';
+    btn.querySelector('.set-title').textContent = current ? `${set.title}  いま学習中` : set.title;
+    btn.querySelector('.set-goal').textContent = `${set.goal}  ${set.questions}問`;
+    btn.addEventListener('click', () => switchSet(set.id));
+    host.appendChild(btn);
+  }
+}
+
+/** Answers belong to the set they were given in. An unsent answer is sent
+ *  before the switch; if it cannot be, the switch waits, so no answer is left
+ *  behind or written into the wrong set's file. */
+async function switchSet(id) {
+  if (id === S.cfg.domain) {
+    paintHome();
+    show('home');
+    return;
+  }
+  const msg = $('sets-msg');
+  if (S.dirty && !S.syncing) await pushEvents();
+  if (S.syncing || S.dirty) {
+    msg.textContent = '前の学習セットの回答をまだ送れていません。つながってからもう一度選んでください。';
+    msg.dataset.tone = 'bad';
+    return;
+  }
+  S.cfg.domain = id;
+  writeLS(LS.cfg, S.cfg);
+  S.bank = null;
+  S.events = [];
+  S.remote = [];
+  S.qstate = new Map();
+  S.session = null;
+  S.lastSyncError = '';
+  await loadAndShow();
+}
+
 function paintSetup() {
   const cfg = S.cfg || prefillFromHash() || {};
   $('in-repo').value = cfg.repo || '';
@@ -699,6 +786,7 @@ async function loadAndShow() {
     S.bank = bank;
     writeLS(LS.bank + S.cfg.domain, bank);
     S.events = readLS(LS.events + S.cfg.domain, []) || [];
+    S.dirty = !!readLS(LS.dirty + S.cfg.domain, false);
     await pullRemoteEvents();
     rebuildState();
     paintHome();
@@ -792,6 +880,14 @@ function wire() {
     show('browse');
   });
   $('btn-browse-back').addEventListener('click', () => {
+    paintHome();
+    show('home');
+  });
+  $('btn-sets').addEventListener('click', () => {
+    show('sets');
+    paintSets();
+  });
+  $('btn-sets-back').addEventListener('click', () => {
     paintHome();
     show('home');
   });

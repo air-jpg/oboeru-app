@@ -369,3 +369,10 @@ input:focus-visible {
   align-items: center;
 }
 .place .bar { display: inline-block; margin-left: 8px; font-size: 13px; color: var(--text-3); font-weight: 400; }
+
+/* 学習セット */
+
+.setrow .label { display: flex; flex-direction: column; gap: 2px; }
+.set-title { font-weight: 600; }
+.set-goal { font-size: 13px; line-height: 1.5; color: var(--text-3); }
+.setrow[data-current] { border-color: var(--line-strong); }

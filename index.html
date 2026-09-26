@@ -13,7 +13,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" href="icon-192.png">
-<link rel="stylesheet" href="app.css?v=4863acbd">
+<link rel="stylesheet" href="app.css?v=cf799ce5">
 </head>
 <body>
 
@@ -61,6 +61,7 @@
 
       <nav class="home-links">
         <button class="linkbtn" id="btn-browse">一覧</button>
+        <button class="linkbtn" id="btn-sets" hidden>学習セット</button>
         <button class="linkbtn" id="btn-settings">設定</button>
       </nav>
     </div>
@@ -120,10 +121,25 @@
     <div class="pad" id="browse-list"></div>
   </section>
 
+  <!-- 学習セット -->
+  <section class="screen" id="screen-sets">
+    <header class="qhead">
+      <button class="iconbtn" id="btn-sets-back" aria-label="戻る">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+      </button>
+      <span class="counter">学習セット</span>
+      <span class="iconbtn-spacer"></span>
+    </header>
+    <div class="pad">
+      <div id="sets-list"></div>
+      <p class="msg" id="sets-msg" role="status"></p>
+    </div>
+  </section>
+
 </div>
 
 <noscript><p style="padding:24px">このページは JavaScript が必要です。</p></noscript>
-<script src="schedule.js?v=4863acbd"></script>
-<script src="app.js?v=4863acbd"></script>
+<script src="schedule.js?v=cf799ce5"></script>
+<script src="app.js?v=cf799ce5"></script>
 </body>
 </html>
