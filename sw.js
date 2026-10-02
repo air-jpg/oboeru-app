@@ -6,9 +6,14 @@
  * revalidate, because GitHub Pages serves these files with a ten minute
  * max-age and without that the browser hands the worker a stale copy: the page
  * would come back new while its script stayed old, which is worse than either.
+ *
+ * The fonts ship with the page as subsets (tools/make_fonts.py), so the
+ * Mincho is in the shell and the look is the same offline. The gothic subset
+ * is left to the runtime cache: an iPhone uses Hiragino and never asks for it.
  */
-const CACHE = 'obo-cf799ce5';
-const SHELL = ['./', 'index.html', 'app.css?v=cf799ce5', 'app.js?v=cf799ce5', 'schedule.js?v=cf799ce5',
+const CACHE = 'obo-d401f2f2';
+const SHELL = ['./', 'index.html', 'app.css?v=d401f2f2', 'app.js?v=d401f2f2', 'schedule.js?v=d401f2f2', 'budoux-ja.js?v=d401f2f2',
+               'zen-old-mincho-700.woff2', 'zen-old-mincho-600.woff2',
                'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-180.png'];
 
 self.addEventListener('install', (e) => {
@@ -29,7 +34,8 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
-  if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
+  if (e.request.method !== 'GET') return;
+  if (url.origin !== self.location.origin) return;
   e.respondWith(
     fetch(e.request.url, { cache: 'no-cache', credentials: 'same-origin' })
       .then((res) => {

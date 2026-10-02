@@ -7,7 +7,8 @@
  *
  * Rule
  *   boxes 0..N
- *   correct -> next box, due = answered_at + gap(box)
+ *   correct -> next box, due = answered_at + gap(box); a gap of a day or
+ *              more counts days, not hours (see "Days" below)
  *   wrong   -> down one box, or two from box 4 up, and due right away so it
  *              comes back in this sitting
  *   a correct answer given before the card was due does not move it up once it
@@ -33,6 +34,13 @@
  *   roughly 24% of the retention interval when that interval is short, and
  *   fall below it deliberately to buy an extra repetition.
  *   With no deadline, or once it has passed, the plain minute ladder applies.
+ *
+ * Days
+ *   On the plain ladder a gap of one day or more is counted in days, and the
+ *   card is due when that day begins, at four in the morning on the clock of
+ *   the device. Counted in hours, a card answered at nine at night would wait until
+ *   nine the next night, and a learner who opens the page once each morning
+ *   would never see it on the day it was promised for.
  */
 (function (root, factory) {
   const api = factory();
@@ -47,6 +55,16 @@
   const DEFAULT_FRACTIONS = [0, 0.02, 0.06, 0.15, 0.30, 0.30];
   const MIN_GAP_MINUTES = 10;
   const MAX_SHARE_OF_REMAINING = 0.6;
+  const DAY_MS = 86400000;
+  const DAY_START_HOUR = 4;      // a learning day runs from 4am to 4am, local time
+
+  /** When the learning day `n` days after the one holding atMs begins. */
+  function dayStart(atMs, n) {
+    const d = new Date(atMs - DAY_START_HOUR * 3600000);
+    d.setHours(DAY_START_HOUR, 0, 0, 0);
+    d.setDate(d.getDate() + n);
+    return d.getTime();
+  }
 
   /** Minutes to wait after landing in `box`. */
   function gapMinutes(box, atMs, intervals, deadlineMs, fractions) {
@@ -59,6 +77,14 @@
     const share = fr[Math.min(box, fr.length - 1)];
     const wanted = left * share;
     return Math.min(Math.max(wanted, MIN_GAP_MINUTES), left * MAX_SHARE_OF_REMAINING);
+  }
+
+  /** When a card that landed in `box` at atMs is due. */
+  function dueAfter(box, atMs, intervals, deadlineMs, fractions) {
+    const mins = gapMinutes(box, atMs, intervals, deadlineMs, fractions);
+    const ladder = !deadlineMs || Number.isNaN(deadlineMs) || deadlineMs <= atMs;
+    if (ladder && mins >= 1440) return dayStart(atMs, Math.round(mins / 1440));
+    return atMs + mins * 60000;
   }
 
   function blank() {
@@ -74,7 +100,7 @@
         // leave box and due as they are
       } else {
         st.box = Math.min(st.box + 1, ivs.length - 1);
-        st.due = tsMs + gapMinutes(st.box, tsMs, ivs, deadlineMs, fractions) * 60000;
+        st.due = dueAfter(st.box, tsMs, ivs, deadlineMs, fractions);
       }
     } else {
       st.box = Math.max(0, st.box - (st.box >= BIG_FALL_FROM ? 2 : 1));
@@ -113,6 +139,6 @@
     return out;
   }
 
-  return { READY_BOX, BIG_FALL_FROM, DEFAULT_INTERVALS, DEFAULT_FRACTIONS,
-           gapMinutes, blank, apply, known, replay };
+  return { READY_BOX, BIG_FALL_FROM, DEFAULT_INTERVALS, DEFAULT_FRACTIONS, DAY_MS,
+           gapMinutes, dayStart, dueAfter, blank, apply, known, replay };
 });

@@ -4,142 +4,227 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>おぼえる</title>
-<meta name="description" content="旅の前に、行く場所のことを覚えておくための出題アプリ">
-<meta name="theme-color" content="#F5F3EE" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#141414" media="(prefers-color-scheme: dark)">
+<meta name="description" content="4択に答えるだけで覚えていく学習帳">
+<meta name="theme-color" content="#ECEAE4" id="meta-theme">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="おぼえる">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" href="icon-192.png">
-<link rel="stylesheet" href="app.css?v=cf799ce5">
+<link rel="preload" href="zen-old-mincho-700.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="app.css?v=d401f2f2">
 </head>
 <body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <!-- 正解に入れる丸と誤答に引く斜線。手で引いたように少しだけ歪ませてある -->
+    <symbol id="maru" viewBox="0 0 100 100">
+      <path d="M52 9C28 8 9 27 10 51c1 23 20 41 43 40 23-1 39-19 38-42C90 27 74 10 49 11c-6 0-12 2-17 5"/>
+    </symbol>
+    <symbol id="batsu" viewBox="0 0 100 100">
+      <path d="M22 20C41 40 62 61 80 81M79 19C60 41 40 61 21 80"/>
+    </symbol>
+  </defs>
+</svg>
 
 <div id="app" hidden>
 
   <!-- 設定 -->
-  <section class="screen" id="screen-setup">
-    <div class="pad">
-      <h1 class="title">はじめの設定</h1>
-      <p class="lead">学習の記録を置く GitHub リポジトリと、読み書きのためのトークンを登録します。登録はこの端末のブラウザの中だけに残ります。</p>
-      <label class="field">
-        <span class="field-label">リポジトリ</span>
-        <input id="in-repo" type="text" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="owner/repo">
-      </label>
-      <label class="field">
-        <span class="field-label">アクセストークン</span>
-        <input id="in-token" type="password" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="github_pat_...">
-        <span class="field-note">
-          対象をこのリポジトリだけにした細粒度トークン。権限は Contents を Read and write に。
-          <a id="token-link" href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">GitHub で作る</a>
-        </span>
-      </label>
-      <label class="field">
-        <span class="field-label">学習セット</span>
-        <input id="in-domain" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="hokuriku-2026-09">
-      </label>
-      <p class="msg" id="setup-msg" role="status"></p>
-      <button class="btn btn-primary" id="btn-save-setup">保存して読み込む</button>
+  <section class="screen" id="screen-setup" aria-labelledby="setup-title">
+    <div class="page">
+      <header class="head">
+        <p class="kicker">はじめの設定</p>
+        <h1 class="title" id="setup-title">記録の置き場所</h1>
+        <p class="lede" data-phrase>答えた記録は GitHub の非公開リポジトリに置きます。この端末から読み書きするためのトークンを1つ登録してください。</p>
+      </header>
+      <ol class="steps">
+        <li class="step">
+          <label class="field" for="in-repo">
+            <span class="field-label">リポジトリ</span>
+            <input id="in-repo" type="text" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="owner/repo" autocomplete="off">
+          </label>
+        </li>
+        <li class="step">
+          <label class="field" for="in-token">
+            <span class="field-label">アクセストークン</span>
+            <input id="in-token" type="password" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="github_pat_" autocomplete="off">
+          </label>
+          <p class="field-note"><span data-phrase>このリポジトリだけを対象にした細粒度トークンを使います。権限は Contents の Read and write です。</span><a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">GitHub で作る</a></p>
+        </li>
+      </ol>
+      <p class="fine" id="setup-next" data-phrase>保存したあとで最初の学習セットを選びます。</p>
+      <p class="fine" data-phrase>登録した値はこの端末のブラウザの中にだけ残ります。</p>
+      <p class="status" id="setup-msg" role="status"></p>
     </div>
+    <footer class="dock">
+      <button class="btn btn-ink" id="btn-save-setup" type="button">保存して読み込む</button>
+    </footer>
   </section>
 
   <!-- ホーム -->
-  <section class="screen" id="screen-home">
-    <div class="pad">
-      <p class="eyebrow" id="home-eyebrow"></p>
-      <h1 class="title serif" id="home-title">おぼえる</h1>
-      <p class="lead" id="home-goal"></p>
-
-      <div class="stats" id="home-stats"></div>
-
-      <button class="btn btn-primary" id="btn-start"></button>
-      <button class="btn btn-quiet" id="btn-weak" hidden>間違えた問題だけ</button>
-
-      <p class="msg" id="home-msg" role="status"></p>
-
-      <nav class="home-links">
-        <button class="linkbtn" id="btn-browse">一覧</button>
-        <button class="linkbtn" id="btn-sets" hidden>学習セット</button>
-        <button class="linkbtn" id="btn-settings">設定</button>
+  <section class="screen" id="screen-home" aria-labelledby="home-title">
+    <div class="page page-home">
+      <header class="cover">
+        <div class="cover-side">
+          <p class="kicker" id="home-kicker"></p>
+          <p class="cover-goal" id="home-goal"></p>
+          <p class="cover-status" id="home-status"></p>
+          <figure class="shelf" id="home-shelf">
+            <div class="shelf-boxes" id="shelf-boxes"></div>
+            <p class="shelf-bracket" id="shelf-bracket"><span id="bracket-label"></span></p>
+          </figure>
+            </div>
+        <h1 class="cover-title" id="home-title"></h1>
+      </header>
+      <p class="home-plan" id="home-plan" hidden><span class="home-plan-kicker">今日は</span><span id="home-plan-text"></span></p>
+      <nav class="menu" aria-label="ほかの画面">
+        <button class="row" id="btn-primer" type="button" hidden><span>考え方を読む</span></button>
+        <button class="row" id="btn-browse" type="button"><span>一覧</span></button>
+        <button class="row" id="btn-sets" type="button" hidden><span>学習セット</span></button>
+        <button class="row" id="btn-settings" type="button"><span>設定</span></button>
       </nav>
+
+      <p class="status" id="home-msg" role="status"></p>
     </div>
+    <footer class="dock">
+      <div class="done" id="home-done" hidden>
+        <p class="done-main" id="done-main"></p>
+        <p class="done-sub" id="done-sub"></p>
+      </div>
+      <button class="btn btn-ink" id="btn-start" type="button">
+        <span class="btn-main" id="start-main">はじめる</span>
+        <span class="btn-sub" id="start-sub"></span>
+      </button>
+      <button class="link link-more" id="btn-more" type="button" hidden>新しい問題をもう12問</button>
+    </footer>
   </section>
 
   <!-- 出題 -->
-  <section class="screen" id="screen-quiz">
-    <header class="qhead">
-      <button class="iconbtn" id="btn-quit" aria-label="中断する">
+  <section class="screen" id="screen-quiz" aria-labelledby="q-prompt">
+    <header class="bar">
+      <button class="icon" id="btn-quit" type="button" aria-label="中断してホームに戻る">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
       </button>
-      <span class="counter" id="q-counter">1 / 1</span>
-      <span class="iconbtn-spacer"></span>
+      <ol class="ticks" id="q-ticks" aria-hidden="true"></ol>
+      <span class="count" id="q-count"></span>
     </header>
-    <div class="progress"><div class="progress-fill" id="q-progress"></div></div>
 
-    <div class="qbody">
-      <p class="eyebrow" id="q-eyebrow"></p>
-      <h2 class="question" id="q-prompt"></h2>
-      <div class="choices" id="q-choices" role="group" aria-label="選択肢"></div>
-      <button class="linkbtn linkbtn-center" id="btn-dunno">わからない</button>
-    </div>
-
-    <div class="verdict" id="q-verdict" hidden>
-      <div class="verdict-inner">
-        <p class="verdict-head" id="v-head"></p>
-        <p class="verdict-answer" id="v-answer" hidden></p>
-        <p class="verdict-text" id="v-text"></p>
-        <p class="verdict-note" id="v-note" hidden></p>
-        <button class="btn btn-primary" id="btn-next">次へ</button>
+    <div class="page page-quiz" id="q-page">
+      <div class="q-area" id="q-area">
+        <div class="q-head" id="q-head">
+          <p class="kicker" id="q-kicker"></p>
+          <h2 class="prompt" id="q-prompt"></h2>
+        </div>
+        <figure class="stage" id="q-stage">
+          <div class="shelf-boxes stage-shelf" id="stage-shelf"></div>
+        </figure>
+        <div class="judge" id="q-judge" aria-live="polite" hidden>
+          <div class="judge-say">
+            <span class="judge-mark" id="v-mark" aria-hidden="true"></span>
+            <span class="judge-word" id="v-head"></span>
+            <span class="sr" id="v-said"></span>
+            <span class="judge-next" id="v-next"></span>
+          </div>
+          <div class="trail" id="q-trail" aria-hidden="true"></div>
+        </div>
+        <button class="link verdict-cue" id="v-cue" type="button" hidden>解説は選択肢の下</button>
+        <section class="verdict" id="q-verdict" hidden>
+          <p class="verdict-chosen" id="v-chosen" hidden></p>
+          <p class="verdict-text" id="v-text"></p>
+          <p class="verdict-aside" id="v-aside" hidden></p>
+          <p class="verdict-src" id="v-src" hidden></p>
+        </section>
       </div>
+      <div class="choices" id="q-choices" role="group" aria-label="選択肢"></div>
+      <div class="verdict-more" id="v-more" hidden></div>
     </div>
+    <footer class="dock dock-quiz" id="q-dock">
+      <div class="dock-row" id="q-before">
+        <span class="dock-where" id="q-where"></span>
+        <button class="link link-dunno" id="btn-dunno" type="button">わからない</button>
+      </div>
+      <button class="btn btn-ink" id="btn-next" type="button" hidden>次の問題</button>
+    </footer>
   </section>
 
   <!-- 結果 -->
-  <section class="screen" id="screen-result">
-    <div class="pad">
-      <p class="eyebrow">おつかれさまでした</p>
-      <h1 class="title serif" id="r-score"></h1>
-      <p class="lead" id="r-note"></p>
-      <ul class="recap" id="r-recap"></ul>
-      <button class="btn btn-primary" id="btn-again">続ける</button>
-      <button class="btn btn-quiet" id="btn-home">ホームに戻る</button>
-      <p class="msg" id="r-msg" role="status"></p>
+  <section class="screen" id="screen-result" aria-labelledby="r-score">
+    <div class="page">
+      <header class="head">
+        <p class="kicker" id="r-kicker">今回の結果</p>
+        <h1 class="score" id="r-score"></h1>
+        <p class="lede" id="r-note"></p>
+      </header>
+      <section id="r-missed-wrap" hidden>
+        <h2 class="section-title">間違えた問題</h2>
+        <ol class="missed" id="r-missed"></ol>
+      </section>
+      <figure class="shelf shelf-result" id="r-shelf">
+        <div class="shelf-boxes" id="r-shelf-boxes"></div>
+        <figcaption class="shelf-cap" id="r-shelf-cap"></figcaption>
+      </figure>
+      <dl class="schedule" id="r-schedule"></dl>
+      <p class="status" id="r-msg" role="status"></p>
+      <button class="link link-more" id="btn-again" type="button" hidden>続けて解く</button>
     </div>
+    <footer class="dock">
+      <button class="btn btn-ink" id="btn-home" type="button">ホームに戻る</button>
+    </footer>
+  </section>
+
+  <!-- 考え方 -->
+  <section class="screen" id="screen-primer" aria-labelledby="primer-title">
+    <header class="bar">
+      <button class="icon" id="btn-primer-back" type="button" aria-label="戻る">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+      </button>
+      <span class="bar-title">考え方</span>
+      <span class="icon-spacer"></span>
+    </header>
+    <article class="page reading" id="primer-body"></article>
   </section>
 
   <!-- 一覧 -->
-  <section class="screen" id="screen-browse">
-    <header class="qhead">
-      <button class="iconbtn" id="btn-browse-back" aria-label="戻る">
+  <section class="screen" id="screen-browse" aria-labelledby="browse-title">
+    <header class="bar">
+      <button class="icon" id="btn-browse-back" type="button" aria-label="戻る">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
       </button>
-      <span class="counter" id="browse-title">一覧</span>
-      <span class="iconbtn-spacer"></span>
+      <span class="bar-title" id="browse-title">一覧</span>
+      <span class="icon-spacer"></span>
     </header>
-    <div class="pad" id="browse-list"></div>
+    <div class="page">
+      <label class="search" for="browse-q">
+        <span class="sr">項目を探す</span>
+        <input id="browse-q" type="search" placeholder="名前で探す" autocomplete="off" autocapitalize="off" spellcheck="false">
+      </label>
+      <p class="browse-key" id="browse-key"></p>
+      <div id="browse-list"></div>
+    </div>
   </section>
 
   <!-- 学習セット -->
-  <section class="screen" id="screen-sets">
-    <header class="qhead">
-      <button class="iconbtn" id="btn-sets-back" aria-label="戻る">
+  <section class="screen" id="screen-sets" aria-labelledby="sets-title">
+    <header class="bar">
+      <button class="icon" id="btn-sets-back" type="button" aria-label="戻る">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
       </button>
-      <span class="counter">学習セット</span>
-      <span class="iconbtn-spacer"></span>
+      <span class="bar-title" id="sets-title">学習セット</span>
+      <span class="icon-spacer"></span>
     </header>
-    <div class="pad">
-      <div id="sets-list"></div>
-      <p class="msg" id="sets-msg" role="status"></p>
+    <div class="page">
+      <ul class="sets" id="sets-list"></ul>
+      <p class="status" id="sets-msg" role="status"></p>
     </div>
   </section>
 
 </div>
 
 <noscript><p style="padding:24px">このページは JavaScript が必要です。</p></noscript>
-<script src="schedule.js?v=cf799ce5"></script>
-<script src="app.js?v=cf799ce5"></script>
+<script src="schedule.js?v=d401f2f2"></script>
+<script src="budoux-ja.js?v=d401f2f2"></script>
+<script src="app.js?v=d401f2f2"></script>
 </body>
 </html>
