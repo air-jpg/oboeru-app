@@ -7,8 +7,8 @@
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#F2EEE5",
-  "theme_color": "#F2EEE5",
+  "background_color": "#EDB43C",
+  "theme_color": "#EDB43C",
   "icons": [
     {
       "src": "icon-192.png",
@@ -21,7 +21,7 @@
       "type": "image/png"
     },
     {
-      "src": "icon-512.png",
+      "src": "icon-maskable-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"

@@ -91,20 +91,57 @@ function h(tag, attrs, ...kids) {
   return el;
 }
 
-function svgUse(id, cls) {
+/** A set's emblem: shapes on a 100 square, each painted "ink", "paper" or
+ *  "mark". Built element by element from the data; no markup is inserted. */
+function paintArt(art) {
   const ns = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(ns, 'svg');
-  svg.setAttribute('class', cls);
   svg.setAttribute('viewBox', '0 0 100 100');
-  svg.setAttribute('preserveAspectRatio', 'none');
   svg.setAttribute('aria-hidden', 'true');
-  // The stroke is drawn from a copy of the path rather than <use>, so that its
-  // length can be measured and the line drawn in, as a pen would.
-  const src = document.querySelector(`#${id} path`);
-  const path = document.createElementNS(ns, 'path');
-  path.setAttribute('d', src.getAttribute('d'));
-  path.setAttribute('pathLength', '1');
-  svg.appendChild(path);
+  svg.setAttribute('class', 'art');
+  const paint = { ink: 'var(--s-ink, var(--ink))', paper: 'var(--s-paper, var(--paper))', mark: 'var(--s-mark, var(--mark))' };
+  for (const s of art || []) {
+    if (!['circle', 'path', 'rect'].includes(s.shape)) continue;
+    const el = document.createElementNS(ns, s.shape);
+    for (const k of ['cx', 'cy', 'r', 'd', 'x', 'y', 'width', 'height', 'rx']) {
+      if (s[k] !== undefined) el.setAttribute(k, String(s[k]));
+    }
+    const colour = paint[s.paint] || paint.ink;
+    if (s.stroke) {
+      el.style.fill = 'none';
+      el.style.stroke = colour;
+      el.style.strokeWidth = String(s.stroke);
+      el.style.strokeLinecap = 'round';
+    } else {
+      el.style.fill = colour;
+    }
+    svg.appendChild(el);
+  }
+  return svg;
+}
+
+let markCount = 0;
+/** A brush mark, drawn in. The filled shape of the stroke is shown through a
+ *  mask: a wide line along the stroke's centre, run from start to end, so the
+ *  red appears in the order a brush would lay it down. Each mark gets its own
+ *  mask; a <use> could not be animated one copy at a time. */
+function svgUse(id, cls) {
+  const ns = 'http://www.w3.org/2000/svg';
+  const el = (tag, attrs) => {
+    const e = document.createElementNS(ns, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    return e;
+  };
+  const svg = el('svg', { class: cls, viewBox: '0 0 100 100', 'aria-hidden': 'true' });
+  const maskId = `mark-${++markCount}`;
+  const mask = el('mask', { id: maskId, maskUnits: 'userSpaceOnUse', x: '-10', y: '-10', width: '120', height: '120' });
+  document.querySelectorAll(`#${id} .guide`).forEach((g, i) => {
+    mask.appendChild(el('path', { d: g.getAttribute('d'), pathLength: '1', class: `reveal reveal-${i}` }));
+  });
+  const ink = el('g', { mask: `url(#${maskId})`, class: 'ink' });
+  document.querySelectorAll(`#${id} .ink`).forEach((p) => ink.appendChild(el('path', { d: p.getAttribute('d') })));
+  svg.append(el('defs', {}), ink);
+  svg.firstChild.appendChild(mask);
   return svg;
 }
 
@@ -487,9 +524,15 @@ function show(name, opts) {
   const swap = () => {
     for (const el of document.querySelectorAll('.screen')) el.classList.toggle('on', el.id === 'screen-' + name);
     document.documentElement.dataset.screen = name;
+    // the long reads sit on a lighter paper
+    document.documentElement.classList.toggle('reading', name === 'primer' || name === 'browse');
     S.screen = name;
     fitDock();
     if (!(opts && opts.keepScroll)) window.scrollTo(0, 0);
+    // the stacks measure the cover over them, and the question its lines,
+    // which have a size only when shown
+    if (name === 'home') fitStacks($('shelf-boxes'));
+    if (name === 'quiz') fitPrompt();
   };
   if (document.startViewTransition && !reduceMotion() && S.screen && S.screen !== name) {
     document.documentElement.dataset.dir = (opts && opts.back) ? 'back' : 'forward';
@@ -544,7 +587,7 @@ function applyTheme() {
     else root.style.removeProperty(v);
   }
   const meta = $('meta-theme');
-  if (meta) meta.content = getComputedStyle(root).getPropertyValue('--paper').trim() || '#ECEAE4';
+  if (meta) meta.content = getComputedStyle(root).getPropertyValue('--paper').trim() || '#EDB43C';
 }
 
 /* ---------- line breaks ---------- */
@@ -563,17 +606,16 @@ function rememberWords() {
   keepWhole = [...words].sort((x, y) => y.length - x.length);
 }
 
+// a range of numbers with its unit, as 20〜50mg
+const AMOUNT = /[0-9０-９][0-9０-９.,]*[〜～~][0-9０-９][0-9０-９.,]*[A-Za-z%％℃]*/g;
+
 /** Put text in an element with a break opportunity at each phrase, so a line
  *  never ends in the middle of a word. word-break: keep-all does the rest. */
 function phrase(el, text) {
   el.textContent = '';
   el.classList.add('phr');
   if (!text) return el;
-  if (!window.BudouX) {
-    el.textContent = text;
-    return el;
-  }
-  const chunks = BudouX.parse(text);
+  const chunks = window.BudouX ? BudouX.parse(text) : [text];
   // a boundary that falls inside a protected word is dropped
   const cuts = [];
   let at = 0;
@@ -589,20 +631,37 @@ function phrase(el, text) {
       i = text.indexOf(w, i + 1);
     }
   }
+  // a range of numbers with its unit, as 20〜50mg, is read as one amount:
+  // no phrase boundary inside it, and no break after its wave dash either
+  for (const m of text.matchAll(AMOUNT)) {
+    for (let k = m.index + 1; k < m.index + m[0].length; k++) banned.add(k);
+  }
+  // the last phrase, when it is only a few characters, stays with the one
+  // before it, so a paragraph does not end on a line of its own two or three
+  const lastCut = cuts.filter((c) => !banned.has(c)).pop();
+  if (lastCut !== undefined && text.length - lastCut <= 4) banned.add(lastCut);
+  const put = (s) => {
+    let i = 0;
+    for (const m of s.matchAll(AMOUNT)) {
+      el.appendChild(document.createTextNode(s.slice(i, m.index)));
+      el.appendChild(h('span', { class: 'amount-range', text: m[0] }));
+      i = m.index + m[0].length;
+    }
+    el.appendChild(document.createTextNode(s.slice(i)));
+  };
   let from = 0;
   for (const c of cuts) {
     if (banned.has(c)) continue;
-    el.appendChild(document.createTextNode(text.slice(from, c)));
+    put(text.slice(from, c));
     el.appendChild(document.createElement('wbr'));
     from = c;
   }
-  el.appendChild(document.createTextNode(text.slice(from)));
+  put(text.slice(from));
   return el;
 }
 
 /* ---------- the shelf: every question is a card standing in the box it has reached ---------- */
 
-const SHELF_LOOSE = 5;     // up to this many cards stand apart; more are drawn as a bundle
 
 function boxLabel(b) {
   if (b === 0) return 'はじめ';
@@ -643,12 +702,6 @@ function jitter(id, salt) {
   return ((h >>> 0) % 1000) / 1000;
 }
 
-/** Width of a bundle of n cards: grows with the square root, so 160 cards
- *  look thicker than 11 without filling the shelf. */
-function bundleWidth(n) {
-  return Math.round(6 + 3.4 * Math.sqrt(n));
-}
-
 function paintShelf(host, opts) {
   const landed = (opts && opts.landed) || new Set();
   const current = (opts && opts.current) || null;
@@ -657,24 +710,21 @@ function paintShelf(host, opts) {
   const order = { due: 0, wait: 1, new: 2 };
   host.innerHTML = '';
   let k = 0;
-  const card = (c, isNew) => {
-    const el = h('i', { class: `card card-${c.kind}${isNew ? ' landed' : ''}` });
-    el.style.setProperty('--r', `${((jitter(c.id, 13) - 0.5) * 3).toFixed(1)}deg`);
-    if (isNew) el.style.setProperty('--k', k++);
-    return el;
-  };
-  const bundle = (cards, isNew) => {
-    const el = h('span', { class: 'bundle' + (isNew ? ' landed' : '') });
-    if (isNew) el.dataset.n = `+${cards.length}`;
-    el.style.width = `${bundleWidth(cards.length)}px`;
-    for (const kind of ['due', 'wait', 'new']) {
-      const n = cards.filter((c) => c.kind === kind).length;
-      if (!n) continue;
-      const seg = h('span', { class: `bundle-${kind}` });
-      seg.style.flexGrow = String(n);
-      el.appendChild(seg);
+  // A box's cards are one stack, as tall as their share of the whole set: the
+  // front hides the first part, and a box holding every card reaches the top.
+  // Cards that came in this sitting stand as a second, darker stack with
+  // their count over it. Height is the only thing that measures.
+  const whole = Math.max(60, S.bank.questions.length);
+  const stack = (cards, isNew) => {
+    const kind = isNew ? 'landed' : cards.some((c) => c.kind === 'due') ? 'due'
+      : cards.some((c) => c.kind === 'wait') ? 'wait' : 'new';
+    const el = h('span', { class: `stack stack-${kind}` });
+    el.style.setProperty('--share', Math.min(1, cards.length / whole).toFixed(3));
+    el.style.setProperty('--n', String(cards.length));
+    if (isNew) {
+      el.dataset.n = `+${cards.length}`;
+      el.style.setProperty('--k', k++);
     }
-    if (isNew) el.style.setProperty('--k', k++);
     return el;
   };
   boxes.forEach((b, i) => {
@@ -682,11 +732,9 @@ function paintShelf(host, opts) {
     const cards = h('div', { class: 'cards' });
     const fresh = b.ids.filter((c) => landed.has(c.id));
     const mine = b.ids.filter((c) => c.id === current);
-    const rest = b.ids.filter((c) => !landed.has(c.id) && c.id !== current).sort((x, y) => order[x.kind] - order[y.kind]);
-    if (rest.length > SHELF_LOOSE) cards.appendChild(bundle(rest, false));
-    else for (const c of rest) cards.appendChild(card(c, false));
-    if (fresh.length > 3) cards.appendChild(bundle(fresh, true));
-    else for (const c of fresh) cards.appendChild(card(c, true));
+    const rest = b.ids.filter((c) => !landed.has(c.id) && c.id !== current);
+    if (rest.length) cards.appendChild(stack(rest, false));
+    if (fresh.length) cards.appendChild(stack(fresh, true));
     // this question's card, lifted out of its box with its name on it
     for (const c of mine) {
       const el = h('i', { class: 'card current' + (currentLabel.length > 5 ? ' long' : ''), text: currentLabel });
@@ -694,14 +742,44 @@ function paintShelf(host, opts) {
     }
     host.appendChild(h('div', { class: 'box' + (i >= READY_FROM ? ' kept' : '') + (total ? '' : ' empty') },
       h('div', { class: 'tray' }, cards,
-        h('span', { class: 'front' }, total ? h('span', { class: 'box-count', text: String(total) }) : null)),
+        h('span', { class: 'front' }, total ? h('span', { class: 'box-count' + (total >= 1000 ? ' long' : ''), text: String(total) }) : null)),
       h('span', { class: 'box-label', text: boxLabel(i) })));
   });
   host.style.gridTemplateColumns = `repeat(${boxes.length}, minmax(0, 1fr))`;
+  requestAnimationFrame(() => fitStacks(host));
   host.setAttribute('role', 'img');
   host.setAttribute('aria-label', boxes.map((b, i) => `${boxLabel(i)}の箱に${b.due + b.wait + b.fresh}問`).join('。'));
   return boxes;
 }
+
+/** How tall each stack may grow. On the home a stack may rise above its box
+ *  into the cover, up to 24px under whatever text stands over its column:
+ *  the goal on the left, the upright title on the right. Elsewhere it stops
+ *  under the top of its tray. A stack taller than that is cut short with two
+ *  slanted lines. */
+function fitStacks(host) {
+  const home = host.closest('.page-home');
+  const over = home ? ['home-goal', 'home-status', 'home-title'].map($)
+    .filter((el) => el && el.textContent.trim() && el.offsetHeight) : [];
+  const coverTop = home ? home.querySelector('.cover').getBoundingClientRect().top : 0;
+  for (const st of host.querySelectorAll('.stack')) {
+    const tray = st.closest('.tray');
+    if (!tray || !tray.clientHeight) continue;
+    const front = tray.querySelector('.front');
+    const frontH = front ? front.offsetHeight : 0;
+    let room = tray.clientHeight - frontH - 8;
+    if (home) {
+      const r = st.getBoundingClientRect();
+      const under = over.map((el) => el.getBoundingClientRect())
+        .filter((o) => o.right > r.left - 8 && o.left < r.right + 8)
+        .reduce((y, o) => Math.max(y, o.bottom + 24), coverTop);
+      room = Math.max(room, tray.getBoundingClientRect().bottom - frontH - under);
+      st.style.setProperty('--room', `${Math.round(room)}px`);
+    }
+    st.classList.toggle('capped', Number(st.style.getPropertyValue('--n')) * 2 > room);
+  }
+}
+addEventListener('resize', () => { if (S.screen === 'home') fitStacks($('shelf-boxes')); });
 
 // The boxes from one day on hold what has been answered right more than once
 // at a spacing; the bracket over them counts those, rather than a word like
@@ -799,7 +877,7 @@ function paintHome() {
   // the whole of today, under the shelf: what is due and what is new
   const roomToday = Math.min(c.fresh, Math.max(0, NEW_PER_DAY - newToday()));
   const plan = [c.due ? `復習${c.due}問` : '', roomToday ? `新しい問題${roomToday}問` : ''].filter(Boolean);
-  $('home-plan-text').textContent = plan.join('と');
+  $('home-plan-text').textContent = `${c.due + roomToday}問`;
 
   const q = buildQueue();
   // said only when the day is more than this one sitting; otherwise the
@@ -866,6 +944,19 @@ function paintTicks() {
   $('q-count').textContent = cur && cur.again ? 'もう一度' : `${firstDone}/${s.firstN}`;
 }
 
+/** A question of three lines or less at the large size is set large, so it
+ *  carries the top of the screen, as long as the page still fits without
+ *  scrolling; otherwise it keeps the usual size. A hidden screen has no lines
+ *  to count, so show() asks again once it is shown. */
+function fitPrompt() {
+  const p = $('q-prompt');
+  p.classList.add('big');
+  if (!p.offsetHeight) return;
+  const line = parseFloat(getComputedStyle(p).lineHeight);
+  const scrolls = document.documentElement.scrollHeight > innerHeight + 1;
+  if (p.offsetHeight > line * 3 + 2 || scrolls) p.classList.remove('big');
+}
+
 function paintQuestion() {
   const s = S.session;
   const { q, again } = s.queue[s.idx];
@@ -885,7 +976,10 @@ function paintQuestion() {
   for (const part of [place, typeLabel].filter(Boolean)) kicker.appendChild(h('span', { text: part }));
   phrase($('q-prompt'), q.prompt);
   const area = $('q-area');
-  area.classList.remove('answered', 'spill', 'keep-kicker');
+  area.classList.remove('answered', 'spill', 'low');
+  clearTimeout(S.moveTimer);
+  $('q-page').classList.remove('moving');
+  $('q-stage').style.top = '';
   area.style.height = '';
   $('q-head').style.transform = '';
   area.appendChild($('q-verdict'));
@@ -927,6 +1021,8 @@ function paintQuestion() {
     : here >= lastBox ? `いま${boxLabel(here)}の箱。正解でここに残る`
       : `いま${boxLabel(here)}の箱。正解で${boxLabel(here + 1)}の箱へ`;
   $('q-page').classList.remove('answered');
+  // the question's size, once the rest of the screen is in place
+  fitPrompt();
   s.shownAt = Date.now();
 }
 
@@ -970,8 +1066,8 @@ function answer(opt, btn) {
   // below. A long question leaves too little room, and then the explanation
   // goes under the choices instead.
   const area = $('q-area');
-  const head = $('q-head');
-  const headTop0 = head.getBoundingClientRect().top;
+  // where the shelf stood before the answer, so it can stay there a moment
+  const stageTop0 = $('q-stage').offsetTop;
   const roomH = area.getBoundingClientRect().height;
   const spill = roomH < 200;
   area.style.height = spill ? '' : `${roomH}px`;
@@ -981,6 +1077,7 @@ function answer(opt, btn) {
   const choicesBox = $('q-choices');
   choicesBox.classList.add('answered');
 
+  const variant = Math.floor(jitter(q.id, 31) * 5);
   const buttons = Array.from($('q-choices').children);
   buttons.forEach((el, i) => {
     const o = el._opt;
@@ -991,10 +1088,10 @@ function answer(opt, btn) {
     el.style.setProperty('--i', i);
     if (o.correct) {
       el.dataset.state = 'correct';
-      el.appendChild(svgUse('maru', 'mark mark-maru'));
+      el.appendChild(svgUse(`maru-${variant}`, 'mark mark-maru'));
     } else if (el === btn) {
       el.dataset.state = 'wrong';
-      el.appendChild(svgUse('batsu', 'mark mark-batsu'));
+      el.appendChild(svgUse(`batsu-${variant}`, 'mark mark-batsu'));
     } else {
       el.dataset.state = 'other';
     }
@@ -1013,7 +1110,7 @@ function answer(opt, btn) {
   $('v-head').textContent = correct ? '正解' : opt ? '不正解' : '答えは丸の選択肢';
   const vm = $('v-mark');
   vm.innerHTML = '';
-  vm.appendChild(svgUse(correct ? 'maru' : 'batsu', 'judge-pen'));
+  vm.appendChild(svgUse(correct ? `maru-${variant}` : `batsu-${variant}`, correct ? 'judge-pen' : 'judge-pen batsu'));
   $('v-said').textContent = correct ? '' : `正解は${q.answer}。`;
   // one line under the mark: where the card went, or when it comes back
   // a long name would break the line; then the card is just this card
@@ -1028,9 +1125,9 @@ function answer(opt, btn) {
   cw.hidden = !chosenWhy;
   cw.textContent = '';
   if (chosenWhy) {
-    cw.append(h('span', { class: 'v-chosen-label', text: `選んだ「${opt.text}」` }), h('span', { text: chosenWhy }));
+    cw.append(h('span', { class: 'v-chosen-label', text: `選んだ「${opt.text}」` }), phrase(h('span'), chosenWhy));
   }
-  $('v-text').textContent = q.explain || '';
+  phrase($('v-text'), q.explain || '');
   const aside = $('v-aside');
   const showHitokoto = q.hitokoto && q.facet === (S.bank.core_facet || '');
   phrase(aside, showHitokoto ? q.hitokoto : '');
@@ -1040,9 +1137,15 @@ function answer(opt, btn) {
   $('q-judge').hidden = false;
   paintTrail($('q-trail'), q, fromBox, st.box);
   if (!spill) {
+    // The verdict line and the explanation sit down by the choices, where the
+    // shelf stood, so the eye has little to cross; the room left over is the
+    // question's.
+    area.classList.add('low');
     // On a short screen the sources, then the one-line rule, go under the
     // choices first, so the explanation itself stays above them.
     const over = () => area.scrollHeight > area.clientHeight + 4;
+    // a large question gives its room back first, before anything moves away
+    if (over()) $('q-prompt').classList.remove('big');
     for (const id of ['v-src', 'v-aside']) {
       if (!over()) break;
       $('v-more').prepend($(id));
@@ -1056,21 +1159,30 @@ function answer(opt, btn) {
       // the verdict line stays under the question; the rest goes below
       $('q-page').appendChild($('q-verdict'));
       $('v-cue').hidden = false;
+      area.classList.remove('low');
     }
   }
   paintTicks();
 
-  // the label over the question names what was asked; it stays when it fits
-  if (!spill && $('v-more').hidden && $('v-cue').hidden) {
-    area.classList.add('keep-kicker');
-    if (area.scrollHeight > area.clientHeight + 4) area.classList.remove('keep-kicker');
+  const stage = $('q-stage');
+  paintShelf($('stage-shelf'), { current: q.id, currentLabel: q.item_name || '' });
+
+  // The shelf from before the answer stays a moment, where it stood: the
+  // card moves from the box it was in to the box it is in now, then the
+  // verdict comes up in its place. Every answer shows it, on any screen;
+  // the small shelf in the verdict line keeps the result.
+  if (!reduceMotion()) {
+    const page = $('q-page');
+    page.classList.add('moving');
+    stage.style.top = `${stageTop0}px`;
+    moveCard($('stage-shelf'), fromBox, st.box);
+    clearTimeout(S.moveTimer);
+    S.moveTimer = setTimeout(() => {
+      page.classList.remove('moving');
+      stage.style.top = '';
+    }, 900);
   }
-  // the question comes down to sit over its verdict; the space gathers above
-  const dyh = headTop0 - head.getBoundingClientRect().top;
-  if (Math.abs(dyh) > 1 && !reduceMotion()) {
-    head.animate([{ transform: `translateY(${dyh}px)` }, { transform: 'none' }],
-      { duration: 220, easing: 'cubic-bezier(0.22, 0.75, 0.2, 1)' });
-  }
+
 
   $('btn-next').textContent = s.idx + 1 >= s.queue.length ? '結果を見る' : '次の問題';
   $('q-before').hidden = true;
@@ -1093,6 +1205,26 @@ function revealVerdict() {
     const by = Math.min(overshoot, room);
     if (by > 8) window.scrollBy({ top: by, behavior: reduceMotion() ? 'auto' : 'smooth' });
   });
+}
+
+/** The lifted card glides from the box it was in to the box it is in now. */
+function moveCard(host, from, to) {
+  const card = host.querySelector('.card.current');
+  const boxes = host.children;
+  if (!card || !boxes[from] || !boxes[to] || reduceMotion()) return;
+  const mid = (el) => { const r = el.getBoundingClientRect(); return r.left + r.width / 2; };
+  const dx = mid(boxes[from]) - mid(boxes[to]);
+  const rest = 'translateX(-50%) rotate(-5deg)';
+  const frames = dx
+    ? [{ transform: `translateX(${dx}px) translateX(-50%) translateY(-10px) rotate(0deg)` }, { transform: rest }]
+    : [{ transform: 'translateX(-50%) translateY(-10px) rotate(0deg)' }, { transform: rest }];
+  let easing = getComputedStyle(document.documentElement).getPropertyValue('--spring').trim() || 'ease-out';
+  try {
+    card.animate(frames, { duration: 760, delay: 220, easing, fill: 'backwards' });
+  } catch (e) {
+    easing = 'cubic-bezier(0.22, 0.75, 0.2, 1)';
+    card.animate(frames, { duration: 600, delay: 220, easing, fill: 'backwards' });
+  }
 }
 
 /** The shelf in small, under the question once it is answered: the card
@@ -1219,7 +1351,6 @@ function finish() {
   // the shelf again, with this sitting's cards dropping into their boxes
   const landed = new Set(s.answers.filter(Boolean).map((a) => a.q.id));
   paintShelf($('r-shelf-boxes'), { landed });
-  $('r-shelf-cap').textContent = `今回の${landed.size}問が入った箱`;
 
   // the misses once more, question and answer, now that the sitting is over:
   // a second look at the end is the benefit of delayed feedback, kept
@@ -1334,7 +1465,7 @@ function filterBrowse() {
 function paintBrowse() {
   const b = S.bank;
   $('browse-q').value = '';
-  $('browse-key').textContent = `点1つが1問。塗った点は${boxLabel(READY_FROM)}以上の箱にある問題。`;
+  phrase($('browse-key'), `点1つが1問。塗った点は${boxLabel(READY_FROM)}以上の箱にある問題。`);
   const label = b.item_label || '項目';
   $('browse-title').textContent = `${label}の一覧`;
   const order = Object.keys(b.type_labels || {});
@@ -1417,8 +1548,10 @@ function plainTheme() {
 async function paintSets() {
   plainTheme();
   const host = $('sets-list');
+  const goals = $('sets-goals');
   const msg = $('sets-msg');
   host.innerHTML = '';
+  goals.innerHTML = '';
   msg.textContent = '読み込んでいます。';
   msg.dataset.tone = '';
   let sets;
@@ -1434,23 +1567,39 @@ async function paintSets() {
     }
   }
   msg.textContent = '';
+  // The sets stand on a shelf as spines, each printed in its own two colours
+  // with its title upright. The one being learned is taken out a little, as
+  // the card being asked is lifted out of its box.
   for (const set of sets) {
     const current = set.id === S.cfg.domain;
-    const btn = h('button', { type: 'button', class: 'set', 'aria-current': current ? 'true' : null },
-      h('span', { class: 'set-mark', 'aria-hidden': 'true', text: set.emblem || set.title.slice(0, 1) }),
-      h('span', { class: 'set-body' },
-        phrase(h('span', { class: 'set-title' }), set.title),
-        phrase(h('span', { class: 'set-goal' }), set.goal),
-        h('span', { class: 'set-meta' }, `${set.questions}問`, current ? h('span', { class: 'now', text: 'いま学習中' }) : null)));
+    const btn = h('button', { type: 'button', class: 'set spine', 'aria-current': current ? 'true' : null,
+      'aria-label': [set.title, set.goal, `${set.questions}問`, current ? 'いま学習中' : ''].filter(Boolean).join('。') },
+      set.art && set.art.length
+        ? h('span', { class: 'set-mark has-art', 'aria-hidden': 'true' }, paintArt(set.art))
+        : h('span', { class: 'set-mark', 'aria-hidden': 'true', text: set.emblem || set.title.slice(0, 1) }),
+      phrase(h('span', { class: 'set-title', 'aria-hidden': 'true' }), set.title));
     const t = set.theme || {};
     const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
     const paper = dark ? t.paper_dark : t.paper;
     const ink = dark ? t.ink_dark : t.ink;
-    const mark = btn.querySelector('.set-mark');
-    if (paper) mark.style.setProperty('--s-paper', paper);
-    if (ink) mark.style.setProperty('--s-ink', ink);
+    // the emblem is printed in reverse, the drawing in the paper colour on the
+    // ink; on the dark tile of a light page the red is between the two, as the
+    // one made for a dark ground alone turns salmon beside the gold
+    const red = dark ? t.mark : t.mark && t.mark_dark ? `color-mix(in srgb, ${t.mark} 40%, ${t.mark_dark})` : t.mark_dark;
+    if (paper) btn.style.setProperty('--s-paper', paper);
+    if (ink) btn.style.setProperty('--s-ink', ink);
+    if (red) btn.style.setProperty('--s-mark', red);
     btn.addEventListener('click', () => switchSet(set.id));
-    host.appendChild(h('li', {}, btn));
+    host.appendChild(h('li', { class: 'spine-slot' }, btn,
+      h('span', { class: 'set-meta', 'aria-hidden': 'true' }, `${set.questions}問`,
+        current ? h('span', { class: 'now', text: '学習中' }) : null)));
+    // under the shelf, what each one is for, so a first choice has more to go on
+    if (set.goal) {
+      const sw = h('span', { class: 'swatch', 'aria-hidden': 'true' });
+      if (paper) sw.style.setProperty('--s-paper', paper);
+      if (ink) sw.style.setProperty('--s-ink', ink);
+      goals.appendChild(h('div', {}, h('dt', {}, sw, set.title), phrase(h('dd'), set.goal)));
+    }
   }
 }
 
