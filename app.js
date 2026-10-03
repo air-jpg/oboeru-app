@@ -602,7 +602,7 @@ function phrase(el, text) {
 
 /* ---------- the shelf: every question is a card standing in the box it has reached ---------- */
 
-const SHELF_LOOSE = 9;     // up to this many cards stand apart; more are drawn as a bundle
+const SHELF_LOOSE = 5;     // up to this many cards stand apart; more are drawn as a bundle
 
 function boxLabel(b) {
   if (b === 0) return 'はじめ';
@@ -710,7 +710,9 @@ const READY_FROM = Schedule.READY_BOX;
 
 function paintBracket(boxes) {
   const kept = boxes.slice(READY_FROM).reduce((n, b) => n + b.due + b.wait, 0);
-  $('bracket-label').textContent = `${boxLabel(READY_FROM)}以上の箱 ${kept}問`;
+  const bl = $('bracket-label');
+  bl.textContent = `${boxLabel(READY_FROM)}以上の箱`;
+  bl.append(h('b', { text: `${kept}問` }));
   $('shelf-bracket').style.setProperty('--from', READY_FROM + 1);
   $('shelf-bracket').style.setProperty('--to', boxes.length + 1);
   $('shelf-bracket').style.gridTemplateColumns = `repeat(${boxes.length}, minmax(0, 1fr))`;
@@ -1210,9 +1212,9 @@ function finish() {
     backs.set(w, (backs.get(w) || 0) + 1);
   }
   const parts = [...backs].slice(0, 2).map(([w, n]) => `${w}に${n}問`);
-  $('r-note').textContent = parts.length
+  phrase($('r-note'), parts.length
     ? `${mins}分で解きました。次は${parts.join('と')}が出ます。`
-    : `${mins}分で解きました。`;
+    : `${mins}分で解きました。`);
 
   // the shelf again, with this sitting's cards dropping into their boxes
   const landed = new Set(s.answers.filter(Boolean).map((a) => a.q.id));
@@ -1272,8 +1274,9 @@ function finish() {
   $('btn-home').textContent = more ? `続けて${Math.min(more, SESSION_LEN)}問を解く` : 'ホームに戻る';
   $('btn-again').hidden = !more;
   $('btn-again').textContent = 'ホームに戻る';
-  if (more) $('r-note').textContent = `${mins}分で解きました。今日はあと${left}問あります。`;
+  if (more) phrase($('r-note'), `${mins}分で解きました。今日はあと${left}問あります。`);
   $('r-kicker').textContent = `今回の${first.length}問`;
+  $('r-side-title').textContent = S.bank.cover_title || S.bank.short_title || '';
   show('result');
   paintSyncNote();
   pushEvents();
@@ -1288,11 +1291,11 @@ function paintPrimer() {
   host.appendChild(h('h1', { class: 'title', id: 'primer-title', text: b.short_title || b.title }));
   for (const block of b.primer || []) {
     if (typeof block === 'string') {
-      host.appendChild(h('p', { text: block }));
+      host.appendChild(phrase(h('p'), block));
     } else if (block.h) {
       host.appendChild(h('h2', { class: 'section-title', text: block.h }));
     } else if (block.p) {
-      host.appendChild(h('p', { text: block.p }));
+      host.appendChild(phrase(h('p'), block.p));
     } else if (block.pair) {
       // two families side by side, and the rule that joins them
       const col = (side) => h('div', { class: 'pair-col' },
@@ -1365,7 +1368,7 @@ function paintBrowse() {
       const facets = Object.entries(it.facets || {}).filter(([, fx]) => fx && fx.answer);
       const body = h('div', { class: 'entry-body' },
         h('dl', { class: 'rows' }, facets.map(([key, fx]) =>
-          h('div', { class: 'rows-row' }, h('dt', { text: fx.label || key }), h('dd', { text: fx.text || fx.answer })))),
+          h('div', { class: 'rows-row' }, h('dt', { text: fx.label || key }), phrase(h('dd'), fx.text || fx.answer)))),
         it.hitokoto ? phrase(h('p', { class: 'entry-note' }), it.hitokoto) : null,
         it.links && it.links.length ? h('p', { class: 'entry-links' }, it.links.map((l) =>
           h('a', { href: l.url, target: '_blank', rel: 'noopener', text: l.title }))) : null);
@@ -1438,7 +1441,7 @@ async function paintSets() {
       h('span', { class: 'set-body' },
         phrase(h('span', { class: 'set-title' }), set.title),
         phrase(h('span', { class: 'set-goal' }), set.goal),
-        h('span', { class: 'set-meta', text: current ? `${set.questions}問 いま学習中` : `${set.questions}問` })));
+        h('span', { class: 'set-meta' }, `${set.questions}問`, current ? h('span', { class: 'now', text: 'いま学習中' }) : null)));
     const t = set.theme || {};
     const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
     const paper = dark ? t.paper_dark : t.paper;

@@ -7,13 +7,12 @@
  * max-age and without that the browser hands the worker a stale copy: the page
  * would come back new while its script stayed old, which is worse than either.
  *
- * The fonts ship with the page as subsets (tools/make_fonts.py), so the
- * Mincho is in the shell and the look is the same offline. The gothic subset
- * is left to the runtime cache: an iPhone uses Hiragino and never asks for it.
+ * The fonts ship with the page as subsets (tools/make_fonts.py) and are in
+ * the shell, so the look is the same offline.
  */
-const CACHE = 'obo-d401f2f2';
-const SHELL = ['./', 'index.html', 'app.css?v=d401f2f2', 'app.js?v=d401f2f2', 'schedule.js?v=d401f2f2', 'budoux-ja.js?v=d401f2f2',
-               'zen-old-mincho-700.woff2', 'zen-old-mincho-600.woff2',
+const CACHE = 'obo-8316182a';
+const SHELL = ['./', 'index.html', 'app.css?v=8316182a', 'app.js?v=8316182a', 'schedule.js?v=8316182a', 'budoux-ja.js?v=8316182a',
+               'line-seed-jp-400.woff2', 'line-seed-jp-700.woff2', 'line-seed-jp-800.woff2',
                'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-180.png'];
 
 self.addEventListener('install', (e) => {

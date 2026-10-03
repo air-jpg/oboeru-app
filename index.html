@@ -12,8 +12,9 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" href="icon-192.png">
-<link rel="preload" href="zen-old-mincho-700.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="app.css?v=d401f2f2">
+<link rel="preload" href="line-seed-jp-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="line-seed-jp-700.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="app.css?v=8316182a">
 </head>
 <body>
 
@@ -152,7 +153,8 @@
   <!-- 結果 -->
   <section class="screen" id="screen-result" aria-labelledby="r-score">
     <div class="page">
-      <header class="head">
+      <header class="head result-head">
+        <p class="side-title" id="r-side-title" aria-hidden="true"></p>
         <p class="kicker" id="r-kicker">今回の結果</p>
         <h1 class="score" id="r-score"></h1>
         <p class="lede" id="r-note"></p>
@@ -223,8 +225,8 @@
 </div>
 
 <noscript><p style="padding:24px">このページは JavaScript が必要です。</p></noscript>
-<script src="schedule.js?v=d401f2f2"></script>
-<script src="budoux-ja.js?v=d401f2f2"></script>
-<script src="app.js?v=d401f2f2"></script>
+<script src="schedule.js?v=8316182a"></script>
+<script src="budoux-ja.js?v=8316182a"></script>
+<script src="app.js?v=8316182a"></script>
 </body>
 </html>
