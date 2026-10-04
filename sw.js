@@ -10,8 +10,8 @@
  * The fonts ship with the page as subsets (tools/make_fonts.py) and are in
  * the shell, so the look is the same offline.
  */
-const CACHE = 'obo-76abbd74';
-const SHELL = ['./', 'index.html', 'app.css?v=76abbd74', 'app.js?v=76abbd74', 'schedule.js?v=76abbd74', 'budoux-ja.js?v=76abbd74',
+const CACHE = 'obo-852cf982';
+const SHELL = ['./', 'index.html', 'app.css?v=852cf982', 'app.js?v=852cf982', 'schedule.js?v=852cf982', 'budoux-ja.js?v=852cf982',
                'line-seed-jp-400.woff2', 'line-seed-jp-700.woff2', 'line-seed-jp-800.woff2',
                'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'icon-180.png'];
 

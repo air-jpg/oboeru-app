@@ -340,14 +340,27 @@ function learningLoad() {
   return load;
 }
 
+/** In season this month or the next, for an item that names its months. */
+function inSeason(q, atMs) {
+  if (!q.months || !q.months.length) return false;
+  const m = new Date(atMs).getMonth() + 1;
+  return q.months.includes(m) || q.months.includes((m % 12) + 1);
+}
+
 /** Up to `room` new questions in the bank's order, passing over a category
- *  that already holds LOAD_CAP unknowns while another one can take the place. */
+ *  that already holds LOAD_CAP unknowns while another one can take the place.
+ *  In a set whose items carry their months, what is in season now and next
+ *  month comes first, so what is learnt can be eaten this week. */
 function pickFresh(fresh, room) {
   if (room <= 0) return [];
   const load = learningLoad();
+  const now = Date.now();
+  const order = fresh.some((q) => q.months)
+    ? fresh.filter((q) => inSeason(q, now)).concat(fresh.filter((q) => !inSeason(q, now)))
+    : fresh;
   const out = [];
   const held = [];
-  for (const q of fresh) {
+  for (const q of order) {
     if (out.length >= room) break;
     const n = load.get(q.category) || 0;
     if (n >= LOAD_CAP) {
@@ -926,6 +939,16 @@ function nextReviewLine(nextDue) {
   return when === 'あす' ? `あすの復習は${n}問` : `次の復習は${when}に${n}問`;
 }
 
+/** For a set about food in season, what this month brings, from the items
+ *  that name their months; shown on the cover when nothing else is. */
+function seasonLine() {
+  const m = new Date().getMonth() + 1;
+  const names = S.bank.items.filter((it) => it.months && it.months.includes(m)).map((it) => it.short_name || it.name);
+  if (!names.length) return '';
+  const shown = names.slice(0, 5);
+  return `${m}月が旬 ${shown.join('・')}${names.length > shown.length ? 'など' : ''}`;
+}
+
 /** One line under the shelf: what is due now, or when the next card is. */
 function shelfCaption(c) {
   if (S.qstate.size === 0) return '正解した札は右の箱へ進みます。';
@@ -986,7 +1009,7 @@ function paintHome() {
 
   const c = counts();
   paintBracket(paintShelf($('shelf-boxes')));
-  phrase($('home-status'), shelfCaption(c));
+  phrase($('home-status'), shelfCaption(c) || seasonLine());
   const q = buildQueue();
   // the whole of today, under the shelf: what is due and what is new
   const roomToday = q.backlog ? 0 : Math.min(c.fresh, newRoom());
