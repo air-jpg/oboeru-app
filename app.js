@@ -34,6 +34,19 @@ const BACKLOG = 2 * SESSION_LEN;   // reviews waiting beyond this pause new ques
 // New questions per day. Reviews are never capped; new ones are, so a day has
 // an end and tomorrow's reviews stay a size that fits in ten minutes.
 const NEW_PER_DAY = 12;
+// The day's new questions follow how the reviews are going. Learning runs
+// fastest when about 85% of answers come out right (Wilson et al. 2019), so
+// when the answers to questions last met on an earlier day fall below 80%
+// over the past week, fewer new ones come until the reviews recover. A
+// "わからない" counts as a miss: it says the card did not stay. With a
+// deadline ahead the full number stays, as coverage comes first then.
+const PACE_MIN_REVIEWS = 20;
+const PACE_STEPS = [[0.80, NEW_PER_DAY], [0.65, 8], [0, 4]];
+// A category holding this many questions met but not yet known takes no new
+// ones while other categories still have some, so unknowns of one kind do
+// not pile on each other and the categories that come easily move ahead
+// (Metcalfe & Kornell 2005: study goes best from the nearly known outward).
+const LOAD_CAP = 5;
 // A card missed twice in a sitting is due at once by the review rule, which
 // would leave a one-question sitting waiting the moment the last one ends.
 // The page offers a card no sooner than ten minutes after its last answer;
@@ -280,6 +293,77 @@ function newToday() {
   return n;
 }
 
+/** The past week's answers to questions last met on an earlier learning day,
+ *  the share of them that were right, and the new questions that allows. */
+function reviewPace() {
+  const ids = new Set();
+  const all = [];
+  for (const e of S.events.concat(S.remote)) {
+    if (!e || !e.qid || ids.has(e.id)) continue;
+    ids.add(e.id);
+    all.push(e);
+  }
+  all.sort((a, b) => parseTs(a.ts) - parseTs(b.ts));
+  const weekAgo = Date.now() - 7 * Schedule.DAY_MS;
+  const last = new Map();
+  let n = 0;
+  let right = 0;
+  for (const e of all) {
+    const t = parseTs(e.ts);
+    const prev = last.get(e.qid);
+    if (prev !== undefined && t >= weekAgo && Schedule.dayStart(prev, 0) < Schedule.dayStart(t, 0)) {
+      n += 1;
+      if (e.correct) right += 1;
+    }
+    last.set(e.qid, t);
+  }
+  const acc = n ? right / n : null;
+  let cap = NEW_PER_DAY;
+  if (n >= PACE_MIN_REVIEWS && !(deadlineMs() > Date.now())) {
+    cap = PACE_STEPS.find(([floor]) => acc >= floor)[1];
+  }
+  return { n, acc, cap };
+}
+
+/** New questions still allowed today. */
+function newRoom() {
+  return Math.max(0, reviewPace().cap - newToday());
+}
+
+/** Questions met but not yet known, by category. */
+function learningLoad() {
+  const load = new Map();
+  for (const q of S.bank.questions) {
+    const st = S.qstate.get(q.id);
+    if (st && !Schedule.known(st)) load.set(q.category, (load.get(q.category) || 0) + 1);
+  }
+  return load;
+}
+
+/** Up to `room` new questions in the bank's order, passing over a category
+ *  that already holds LOAD_CAP unknowns while another one can take the place. */
+function pickFresh(fresh, room) {
+  if (room <= 0) return [];
+  const load = learningLoad();
+  const out = [];
+  const held = [];
+  for (const q of fresh) {
+    if (out.length >= room) break;
+    const n = load.get(q.category) || 0;
+    if (n >= LOAD_CAP) {
+      held.push(q);
+      continue;
+    }
+    out.push(q);
+    load.set(q.category, n + 1);
+  }
+  for (const q of held) {
+    if (out.length >= room) break;
+    out.push(q);
+  }
+  return out;
+}
+
 function buildQueue(opts) {
   const only = (opts && opts.only) || null;   // 'weak' limits to items answered wrong
   const extra = !!(opts && opts.extra);       // past today's new-question cap, asked for
@@ -306,8 +390,8 @@ function buildQueue(opts) {
   const backlog = !extra && !only && due.length > BACKLOG;
   const stOf = (q) => S.qstate.get(q.id);
   due.sort((a, b) => (backlog ? stOf(a).box - stOf(b).box : 0) || stOf(a).due - stOf(b).due);
-  const room = extra ? SESSION_LEN : backlog ? 0 : Math.max(0, NEW_PER_DAY - newToday());
-  fresh.splice(room);
+  const room = extra ? SESSION_LEN : backlog ? 0 : newRoom();
+  fresh.splice(0, fresh.length, ...pickFresh(fresh, room));
 
   // Interleave review and new so the session is not two blocks.
   const out = [];
@@ -846,7 +930,7 @@ function nextReviewLine(nextDue) {
 function shelfCaption(c) {
   if (S.qstate.size === 0) return '正解した札は右の箱へ進みます。';
   return '';
-  const room = Math.max(0, NEW_PER_DAY - newToday());
+  const room = newRoom();
   const unseen = S.bank.questions.filter((x) => !S.qstate.has(x.id)).length;
   if (c.due > 0 || (room && unseen)) return room && unseen ? `今日の新しい問題はあと${Math.min(room, unseen)}問です。` : '';
   // when the day is done the button already says when the next review is
@@ -905,15 +989,18 @@ function paintHome() {
   phrase($('home-status'), shelfCaption(c));
   const q = buildQueue();
   // the whole of today, under the shelf: what is due and what is new
-  const roomToday = q.backlog ? 0 : Math.min(c.fresh, Math.max(0, NEW_PER_DAY - newToday()));
+  const roomToday = q.backlog ? 0 : Math.min(c.fresh, newRoom());
   const plan = [c.due ? `復習${c.due}問` : '', roomToday ? `新しい問題${roomToday}問` : ''].filter(Boolean);
   $('home-plan-text').textContent = `${c.due + roomToday}問`;
   // said only when the day is more than this one sitting; otherwise the
   // button already says it
   $('home-plan').hidden = !plan.length || c.due + roomToday <= q.list.length;
   const note = $('home-plan-note');
-  phrase(note, q.backlog ? `復習が${BACKLOG}問を超えたので、減るまで新しい問題は休みます。` : '');
-  note.hidden = !q.backlog;
+  const pace = reviewPace();
+  const slower = !q.backlog && pace.cap < NEW_PER_DAY && c.fresh > 0;
+  phrase(note, q.backlog ? `復習が${BACKLOG}問を超えたので、減るまで新しい問題は休みます。`
+    : slower ? `この7日の復習の正答率が${Math.round(pace.acc * 100)}%なので、新しい問題を1日${pace.cap}問にしています。` : '');
+  note.hidden = !(q.backlog || slower);
   const start = $('btn-start');
   const unseen = S.bank.questions.filter((x) => !S.qstate.has(x.id)).length;
   $('home-done').hidden = !!q.list.length;
@@ -1447,7 +1534,7 @@ function finish() {
   // the score steps back; going home is the link. A finished day ends here.
   const more = buildQueue().list.length;
   const c = counts();
-  const left = c.due + Math.min(c.fresh, Math.max(0, NEW_PER_DAY - newToday()));
+  const left = c.due + Math.min(c.fresh, newRoom());
   S.resultGoesOn = more > 0;
   $('screen-result').classList.toggle('goes-on', more > 0);
   $('btn-home').textContent = more ? `続けて${Math.min(more, SESSION_LEN)}問を解く` : 'ホームに戻る';
@@ -1519,19 +1606,30 @@ function paintBrowse() {
   const order = Object.keys(b.type_labels || {});
   const host = $('browse-list');
   host.innerHTML = '';
+  // how many of a group's questions are known, beside its title
+  const tally = (pred) => {
+    const qs = b.questions.filter(pred);
+    const n = qs.filter((q) => Schedule.known(S.qstate.get(q.id))).length;
+    return h('span', { class: 'group-count' }, h('span', { 'aria-hidden': 'true', text: `${n}/${qs.length}` }),
+      h('span', { class: 'sr', text: `${qs.length}問のうち${n}問をおぼえた` }));
+  };
   for (const t of order) {
     const items = b.items.filter((x) => x.type === t);
     if (!items.length) continue;
-    host.appendChild(h('h2', { class: 'section-title browse-type', text: b.type_labels[t] }));
     const known = b.category_order || [];
     const cats = [...new Set(items.map((x) => x.category))]
       .sort((x, y) => (known.indexOf(x) + 1 || 999) - (known.indexOf(y) + 1 || 999));
     const grouped = cats.length > 1 && cats.length < items.length;
+    host.appendChild(h('h2', { class: 'section-title browse-type' }, h('span', { text: b.type_labels[t] }),
+      grouped ? null : tally((q) => q.type === t)));
     let ul = null;
     let lastCat = null;
     for (const it of items.slice().sort((x, y) => cats.indexOf(x.category) - cats.indexOf(y.category))) {
       if (!ul || (grouped && it.category !== lastCat)) {
-        if (grouped) host.appendChild(h('h3', { class: 'group-title', text: it.category }));
+        if (grouped) {
+          host.appendChild(h('h3', { class: 'group-title' }, h('span', { text: it.category }),
+            tally((q) => q.type === t && q.category === it.category)));
+        }
         ul = h('ul', { class: 'entries' });
         host.appendChild(ul);
         lastCat = it.category;

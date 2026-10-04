@@ -1007,6 +1007,9 @@ body {
 .browse-key { margin: 12px 0 0; font-size: 14px; color: var(--ink-2); }
 #browse-list > .section-title:first-child { margin-top: 24px; }
 .group-title { margin: 24px 0 8px; font-size: 14px; font-weight: 700; letter-spacing: 0.02em; color: var(--ink-2); }
+/* known out of all, beside a group's title in the list */
+.browse-type, .group-title { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.group-count { flex: none; font-size: 13px; font-weight: 400; letter-spacing: 0; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .entries { margin: 0; padding: 0; list-style: none; border-top: 2px solid var(--rule); }
 .entry { border-bottom: 1px solid var(--rule); }
 .entry summary {
