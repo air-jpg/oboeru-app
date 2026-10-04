@@ -868,7 +868,7 @@ function paintShelf(host, opts) {
     }
     host.appendChild(h('div', { class: 'box' + (i >= READY_FROM ? ' kept' : '') + (total ? '' : ' empty') },
       h('div', { class: 'tray' }, cards,
-        h('span', { class: 'front' }, total ? h('span', { class: 'box-count' + (total >= 1000 ? ' long' : ''), text: String(total) }) : null)),
+        h('span', { class: 'front' }, total ? h('span', { class: 'box-count' + (total >= 200 ? ' long' : ''), text: String(total) }) : null)),
       h('span', { class: 'box-label', text: boxLabel(i) })));
   });
   host.style.gridTemplateColumns = `repeat(${boxes.length}, minmax(0, 1fr))`;
@@ -943,7 +943,17 @@ function nextReviewLine(nextDue) {
  *  that name their months; shown on the cover when nothing else is. */
 function seasonLine() {
   const m = new Date().getMonth() + 1;
-  const names = S.bank.items.filter((it) => it.months && it.months.includes(m)).map((it) => it.short_name || it.name);
+  // take the kinds in turn (vegetables, fish) so one kind does not fill the line
+  const lanes = new Map();
+  for (const it of S.bank.items) {
+    if (!it.months || !it.months.includes(m)) continue;
+    if (!lanes.has(it.type)) lanes.set(it.type, []);
+    lanes.get(it.type).push(it.short_name || it.name);
+  }
+  const names = [];
+  for (let i = 0; names.length < [...lanes.values()].reduce((n, l) => n + l.length, 0); i += 1) {
+    for (const l of lanes.values()) if (l[i]) names.push(l[i]);
+  }
   if (!names.length) return '';
   const shown = names.slice(0, 5);
   return `${m}月が旬 ${shown.join('・')}${names.length > shown.length ? 'など' : ''}`;
