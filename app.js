@@ -24,11 +24,13 @@ const LS = {
   sha: 'obo.sha.',
   device: 'obo.device',
   dirty: 'obo.dirty.',
+  sent: 'obo.sent.',     // how many of this device's answers the last send carried
   sets: 'obo.sets',
   notes: 'obo.notes',
 };
 
 const SESSION_LEN = 12;
+const BACKLOG = 2 * SESSION_LEN;   // reviews waiting beyond this pause new questions
 // New questions per day. Reviews are never capped; new ones are, so a day has
 // an end and tomorrow's reviews stay a size that fits in ten minutes.
 const NEW_PER_DAY = 12;
@@ -50,6 +52,13 @@ function readyAt(st) {
 // A question missed in a sitting comes back before the sitting ends, a few
 // questions later so that the answer has to be recalled rather than repeated.
 const REASK_GAP = 3;
+// A question takes taps only after it has been on screen this long, so a
+// second tap on "次の問題" cannot land on the next question's choices or
+// "わからない" and be kept as an answer.
+const TAP_GUARD_MS = 450;
+function tooSoon() {
+  return !!(S.session && Date.now() - S.session.shownAt < TAP_GUARD_MS);
+}
 const REASK_MAX = 4;
 
 const S = {
@@ -291,8 +300,13 @@ function buildQueue(opts) {
     if (!st) fresh.push(q);
     else if (st.due !== null && readyAt(st) <= now) due.push(q);
   }
-  due.sort((a, b) => S.qstate.get(a.id).due - S.qstate.get(b.id).due);
-  const room = extra ? SESSION_LEN : Math.max(0, NEW_PER_DAY - newToday());
+  // More reviews waiting than two sittings (after days away): new questions
+  // rest until they are down, and the cards on the shortest gaps come first,
+  // as they are the likeliest to slip. Nothing is asked; the home says why.
+  const backlog = !extra && !only && due.length > BACKLOG;
+  const stOf = (q) => S.qstate.get(q.id);
+  due.sort((a, b) => (backlog ? stOf(a).box - stOf(b).box : 0) || stOf(a).due - stOf(b).due);
+  const room = extra ? SESSION_LEN : backlog ? 0 : Math.max(0, NEW_PER_DAY - newToday());
   fresh.splice(room);
 
   // Interleave review and new so the session is not two blocks.
@@ -307,7 +321,7 @@ function buildQueue(opts) {
     else if (i < due.length) out.push(due[i++]);
     else break;
   }
-  return { list: spaceOutItems(out), due: i, fresh: j };
+  return { list: spaceOutItems(out), due: i, fresh: j, backlog };
 }
 
 /** A question naming the answer and asking which item it belongs to only makes
@@ -443,6 +457,7 @@ async function pushEvents() {
         S.lastSyncError = '';
         S.dirty = S.events.length > sent;
         writeLS(LS.dirty + domain, S.dirty);
+        writeLS(LS.sent + domain, sent);
         return;
       }
       if (res.status === 409 || res.status === 422) {
@@ -552,18 +567,31 @@ function fitDock() {
 }
 if (dockWatch) document.querySelectorAll('.dock').forEach((d) => dockWatch.observe(d));
 
+/** Answers on this device not yet in the repository, or null when the page
+ *  cannot tell (answers given before it began counting). */
+function unsentCount() {
+  if (S.mode === 'local' || !S.dirty) return 0;
+  const sent = readLS(LS.sent + S.cfg.domain, null);
+  return sent === null ? null : Math.max(0, S.events.length - sent);
+}
+
 function paintSyncNote() {
+  const n = unsentCount();
+  const left = n === null ? '送れていない答えがあります。' : n ? `送れていない答えが${n}件あります。` : '';
   const note = S.mode === 'local'
     ? 'この端末だけで動いています。記録は送りません。'
     : S.lastSyncError
-      ? `${S.lastSyncError}答えはこの端末に残してあり、つながったら送ります。`
-      : S.dirty ? '記録を送っています。' : '';
+      ? `${S.lastSyncError}${left}この端末に残してあり、つながったら送ります。`
+      : S.syncing ? '記録を送っています。' : left;
   for (const id of ['home-msg', 'r-msg']) {
     const el = $(id);
     if (!el) continue;
     el.textContent = note;
     el.dataset.tone = S.lastSyncError ? 'bad' : '';
   }
+  // a way to send now, for when the network has come back
+  const btn = $('btn-send');
+  if (btn) btn.hidden = !(S.mode !== 'local' && S.dirty && !S.syncing);
 }
 
 function fmtDeadline() {
@@ -580,14 +608,15 @@ function applyTheme() {
   const b = S.bank || {};
   const t = b.theme || {};
   const root = document.documentElement;
-  const pairs = [['paper', '--t-paper'], ['ink', '--t-ink'], ['mark', '--t-mark'],
-                 ['paper_dark', '--t-paper-d'], ['ink_dark', '--t-ink-d'], ['mark_dark', '--t-mark-d']];
+  // the page has one light look; the set's dark colours are kept in its
+  // theme but not used
+  const pairs = [['paper', '--t-paper'], ['ink', '--t-ink'], ['mark', '--t-mark']];
   for (const [k, v] of pairs) {
     if (t[k]) root.style.setProperty(v, t[k]);
     else root.style.removeProperty(v);
   }
   const meta = $('meta-theme');
-  if (meta) meta.content = getComputedStyle(root).getPropertyValue('--paper').trim() || '#EDB43C';
+  if (meta) meta.content = getComputedStyle(root).getPropertyValue('--paper').trim() || '#FBF7EE';
 }
 
 /* ---------- line breaks ---------- */
@@ -874,15 +903,17 @@ function paintHome() {
   const c = counts();
   paintBracket(paintShelf($('shelf-boxes')));
   phrase($('home-status'), shelfCaption(c));
+  const q = buildQueue();
   // the whole of today, under the shelf: what is due and what is new
-  const roomToday = Math.min(c.fresh, Math.max(0, NEW_PER_DAY - newToday()));
+  const roomToday = q.backlog ? 0 : Math.min(c.fresh, Math.max(0, NEW_PER_DAY - newToday()));
   const plan = [c.due ? `復習${c.due}問` : '', roomToday ? `新しい問題${roomToday}問` : ''].filter(Boolean);
   $('home-plan-text').textContent = `${c.due + roomToday}問`;
-
-  const q = buildQueue();
   // said only when the day is more than this one sitting; otherwise the
   // button already says it
   $('home-plan').hidden = !plan.length || c.due + roomToday <= q.list.length;
+  const note = $('home-plan-note');
+  phrase(note, q.backlog ? `復習が${BACKLOG}問を超えたので、減るまで新しい問題は休みます。` : '');
+  note.hidden = !q.backlog;
   const start = $('btn-start');
   const unseen = S.bank.questions.filter((x) => !S.qstate.has(x.id)).length;
   $('home-done').hidden = !!q.list.length;
@@ -996,7 +1027,7 @@ function paintQuestion() {
         phrase(h('span', { class: 'choice-text' }), opt.text),
         h('span', { class: 'choice-back' }, h('span', { class: 'choice-back-in' }))));
     btn.addEventListener('click', () => {
-      if (!S.session.answered) return answer(opt, btn);
+      if (!S.session.answered) return tooSoon() ? undefined : answer(opt, btn);
       // a marked choice opens its note on a tap
       if (!btn.classList.contains('has-back')) return;
       const open = btn.classList.toggle('open');
@@ -1128,10 +1159,14 @@ function answer(opt, btn) {
     cw.append(h('span', { class: 'v-chosen-label', text: `選んだ「${opt.text}」` }), phrase(h('span'), chosenWhy));
   }
   phrase($('v-text'), q.explain || '');
+  // one more line: the set's rule of thumb on its core question, or else a
+  // dish to cook with what this question teaches
   const aside = $('v-aside');
   const showHitokoto = q.hitokoto && q.facet === (S.bank.core_facet || '');
-  phrase(aside, showHitokoto ? q.hitokoto : '');
-  aside.hidden = !showHitokoto;
+  aside.textContent = '';
+  if (showHitokoto) phrase(aside, q.hitokoto);
+  else if (q.try) aside.append(h('span', { class: 'v-try-label', text: '試すなら' }), phrase(h('span'), q.try));
+  aside.hidden = !(showHitokoto || q.try);
   paintSources(q);
   v.hidden = false;
   $('q-judge').hidden = false;
@@ -1369,6 +1404,17 @@ function finish() {
   }
   $('r-missed-wrap').hidden = !shownMiss.size;
 
+  // dishes to cook with what this sitting asked about, at most three, the
+  // ones from missed questions first
+  const tries = [];
+  for (const a of [...first.filter((x) => !x.correct), ...first.filter((x) => x.correct)]) {
+    if (a.q.try && !tries.includes(a.q.try)) tries.push(a.q.try);
+  }
+  const tryList = $('r-try');
+  tryList.innerHTML = '';
+  for (const t of tries.slice(0, 3)) tryList.appendChild(phrase(h('li'), t));
+  $('r-try-wrap').hidden = !tries.length;
+
   // when each card from this sitting comes back, soonest first; the latest
   // answer to a card decides it, so a missed card answered again counts once
   const last = new Map();
@@ -1394,6 +1440,8 @@ function finish() {
         ...shown.map((n) => h('span', { class: 'name', text: n })),
         names.length > shown.length ? h('span', { class: 'name more', text: `ほか${names.length - shown.length}件` }) : null)));
   }
+
+  paintCalendar($('r-cal'));
 
   // While today still has questions, the next sitting is the main button and
   // the score steps back; going home is the link. A finished day ends here.
@@ -1542,7 +1590,7 @@ async function fetchSetIndex() {
 /** The set screen is printed on no set's paper. Leaving it puts the set back. */
 function plainTheme() {
   const root = document.documentElement;
-  for (const v of ['--t-paper', '--t-ink', '--t-mark', '--t-paper-d', '--t-ink-d', '--t-mark-d']) root.style.removeProperty(v);
+  for (const v of ['--t-paper', '--t-ink', '--t-mark']) root.style.removeProperty(v);
 }
 
 async function paintSets() {
@@ -1579,13 +1627,12 @@ async function paintSets() {
         : h('span', { class: 'set-mark', 'aria-hidden': 'true', text: set.emblem || set.title.slice(0, 1) }),
       phrase(h('span', { class: 'set-title', 'aria-hidden': 'true' }), set.title));
     const t = set.theme || {};
-    const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    const paper = dark ? t.paper_dark : t.paper;
-    const ink = dark ? t.ink_dark : t.ink;
+    const paper = t.paper;
+    const ink = t.ink;
     // the emblem is printed in reverse, the drawing in the paper colour on the
-    // ink; on the dark tile of a light page the red is between the two, as the
-    // one made for a dark ground alone turns salmon beside the gold
-    const red = dark ? t.mark : t.mark && t.mark_dark ? `color-mix(in srgb, ${t.mark} 40%, ${t.mark_dark})` : t.mark_dark;
+    // ink; on that dark tile the red is between the set's two reds, as the one
+    // made for a dark ground alone turns salmon beside the gold
+    const red = t.mark && t.mark_dark ? `color-mix(in srgb, ${t.mark} 40%, ${t.mark_dark})` : t.mark || t.mark_dark;
     if (paper) btn.style.setProperty('--s-paper', paper);
     if (ink) btn.style.setProperty('--s-ink', ink);
     if (red) btn.style.setProperty('--s-mark', red);
@@ -1601,6 +1648,37 @@ async function paintSets() {
       goals.appendChild(h('div', {}, h('dt', {}, sw, set.title), phrase(h('dd'), set.goal)));
     }
   }
+}
+
+/** This month, with a mark on each day answers were given in this set, on any
+ *  device. Days run from 4am as the reviews do. The empty days are left plain
+ *  and no run of days is counted: a broken run, shown, makes people stop. */
+function paintCalendar(host) {
+  if (!host) return;
+  const key = (d) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+  const learned = new Set();
+  for (const e of [...S.events, ...S.remote]) {
+    const ms = Date.parse(e.ts);
+    if (!Number.isNaN(ms)) learned.add(key(new Date(Schedule.dayStart(ms, 0))));
+  }
+  const today = new Date(Schedule.dayStart(Date.now(), 0));
+  const y = today.getFullYear();
+  const m = today.getMonth();
+  const days = new Date(y, m + 1, 0).getDate();
+  const lead = (new Date(y, m, 1).getDay() + 6) % 7;     // the week starts on Monday
+  let count = 0;
+  const grid = h('div', { class: 'cal-grid' });
+  for (const w of ['月', '火', '水', '木', '金', '土', '日']) grid.appendChild(h('span', { class: 'cal-dow', text: w }));
+  for (let i = 0; i < lead; i++) grid.appendChild(h('span', { class: 'cal-day' }));
+  for (let d = 1; d <= days; d++) {
+    const on = learned.has(key(new Date(y, m, d)));
+    count += on ? 1 : 0;
+    grid.appendChild(h('span', { class: 'cal-day' + (on ? ' on' : '') + (d === today.getDate() ? ' today' : ''), text: String(d) }));
+  }
+  host.innerHTML = '';
+  host.setAttribute('role', 'img');
+  host.setAttribute('aria-label', `${m + 1}月に学んだ日は${count}日`);
+  host.append(h('p', { class: 'cal-month', 'aria-hidden': 'true', text: `${m + 1}月` }), grid);
 }
 
 /** Answers belong to the set they were given in. An unsent answer is sent
@@ -1657,6 +1735,8 @@ async function loadAndShow() {
     writeLS(LS.bank + S.cfg.domain, bank);
     S.events = readLS(LS.events + S.cfg.domain, []) || [];
     S.dirty = !!readLS(LS.dirty + S.cfg.domain, false);
+    // with nothing waiting, every answer here has been sent
+    if (!S.dirty) writeLS(LS.sent + S.cfg.domain, S.events.length);
     await pullRemoteEvents();
     rebuildState();
     paintHome();
@@ -1756,7 +1836,14 @@ function wire() {
   $('btn-start').addEventListener('click', () => startSession());
   $('btn-more').addEventListener('click', () => startSession({ extra: true }));
   $('btn-next').addEventListener('click', next);
-  $('btn-dunno').addEventListener('click', () => answer(null, null));
+  $('btn-dunno').addEventListener('click', () => { if (!tooSoon()) answer(null, null); });
+  $('btn-send').addEventListener('click', async () => {
+    S.lastSyncError = '';
+    const p = pushEvents();
+    paintSyncNote();
+    await p;
+    paintSyncNote();
+  });
   $('btn-quit').addEventListener('click', goHome);
   $('btn-again').addEventListener('click', goHome);
   $('btn-home').addEventListener('click', () => {

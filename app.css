@@ -1,11 +1,12 @@
 /* おぼえる
  *
- * Each learning set is printed in two colours of its own: a paper and an ink
- * taken from its subject (the gold of a first dashi and the brown of dried
- * bonito, the sea off Toyama and its navy, a maple top and rosewood). A third
- * colour is kept for the marks a teacher puts on an answer, a circle and a
- * stroke, and is used for nothing else: not for words, not for progress.
- * Every other tone is a mix of the two.
+ * The page is one light paper, a warm cream, the same for every set and in
+ * the dark as in the day. Each set brings two colours of its own taken from
+ * its subject (the gold of a first dashi and the brown of dried bonito, the
+ * sea off Toyama and its navy, a maple top and rosewood): its ink for words
+ * and lines, and its colour as a tint for the cards on the shelf and the
+ * spines. A third colour is kept for the marks a teacher puts on an answer,
+ * a circle and a stroke, and is used for nothing else.
  *
  * The one thing on screen meant to be remembered is the shelf: the review
  * boxes, with each question as a card standing in the box it has reached.
@@ -47,10 +48,10 @@
   --display: var(--gothic);
   --num: var(--gothic);
 
-  /* the set's two colours and the mark; app.js fills the --t- values */
-  /* before a set is loaded (setup, the first pick) the page wears its own
-     colours: the gold, black and vermilion of the icon */
-  --paper: var(--t-paper, #EDB43C);
+  /* one cream paper for every set; the set's own colour is a tint, and its
+     ink and mark come from app.js through the --t- values */
+  --paper: #FBF7EE;
+  --tint: var(--t-paper, #EDB43C);
   --ink: var(--t-ink, #17140F);
   --mark: var(--t-mark, #AA280E);
 
@@ -77,27 +78,16 @@
   color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --paper: var(--t-paper-d, #15120C);
-    --ink: var(--t-ink-d, #EDB43C);
-    --mark: var(--t-mark-d, #FF6B4F);
-    --text: color-mix(in srgb, var(--ink) 82%, var(--paper));
-    --rule: color-mix(in srgb, var(--ink) 60%, var(--paper));
-    color-scheme: dark;
-  }
-}
+/* no dark version: the page stays on its light paper whatever the device is
+   set to */
 
 *, *::before, *::after { box-sizing: border-box; }
 
 /* titles, questions and numbers are in the ink at full strength */
 .title, .prompt, .cover-title, .score, .judge-word, .box-count, .section-title, .side-title { color: var(--ink); }
 
-/* reading at length (the primer, the list): the paper lighter, nearer white */
-:root.reading { --paper: color-mix(in srgb, var(--t-paper, #EDB43C) 55%, #FFFFFF); }
-@media (prefers-color-scheme: dark) {
-  :root.reading { --paper: var(--t-paper-d, #15120C); }
-}
+/* reading at length (the primer, the list): the paper whiter still */
+:root.reading { --paper: #FFFDF8; }
 
 /* .btn and the rest set display, which would otherwise beat the attribute */
 [hidden] { display: none !important; }
@@ -107,6 +97,9 @@ html {
   text-size-adjust: 100%;
   background: var(--paper);
   transition: background-color 400ms var(--ease-out);
+  /* a focused control scrolls clear of the bar on top and the dock below */
+  scroll-padding-top: 64px;
+  scroll-padding-bottom: calc(var(--dock-h, 0px) + 16px);
 }
 
 body {
@@ -184,6 +177,8 @@ body {
 .status { margin: 16px 0 0; min-height: 1.6em; font-size: 14px; line-height: 1.6; color: var(--ink-2); }
 .status:empty { display: none; }
 .status[data-tone="bad"] { color: var(--mark); }
+/* under an unsent note: send now, for when the network is back */
+.link-send { display: flex; align-items: center; min-height: 44px; margin-top: 4px; font-size: 14px; color: var(--ink); }
 
 .fine { margin: 24px 0 0; font-size: 14px; line-height: 1.7; color: var(--ink-2); }
 
@@ -229,11 +224,12 @@ body {
   transition: transform 220ms var(--spring), background-color 160ms var(--ease-out);
 }
 .btn:active:not(:disabled) { transform: scale(0.98); }
-.btn-ink { background: var(--ink); color: var(--paper); }
+/* the one button that starts or moves on, in the set's own colour */
+.btn-ink { background: var(--tint); color: var(--ink); border-color: var(--ink); }
 .btn-line { background: transparent; color: var(--ink); border-color: var(--ink); min-height: 50px; }
 .btn-line:active:not(:disabled) { background: var(--press); }
 .btn:disabled { background: var(--press); color: var(--ink-2); cursor: default; }
-.btn-sub { margin-top: 4px; font-size: 14px; font-weight: 400; letter-spacing: 0.02em; color: color-mix(in srgb, currentColor 78%, transparent); }
+.btn-sub { margin-top: 4px; font-size: 14px; font-weight: 400; letter-spacing: 0.02em; color: color-mix(in srgb, currentColor 90%, transparent); }
 .btn-sub:empty { display: none; }
 
 .link {
@@ -289,7 +285,7 @@ body {
   padding: env(safe-area-inset-top) var(--gutter) 0;
   background: var(--paper);
 }
-.bar-title { flex: 1; text-align: center; font-size: 14px; font-weight: 700; letter-spacing: 0.02em; }
+.bar-title { flex: 1; margin: 0; text-align: center; font-size: 14px; font-weight: 700; line-height: inherit; letter-spacing: 0.02em; }
 
 /* ---------- setup ---------- */
 
@@ -375,10 +371,27 @@ body {
   .page-home .shelf, .page-home .home-plan { margin-bottom: 8px; }
   .page-home .tray { --front: 56px; min-height: 88px; }
 }
+/* the smallest phones (320 wide, 568 high): three figures fit their box, and
+   the shelf gives up height so the menu stays above the bar */
+@media (max-width: 359px) {
+  .box-count { font-size: 22px; }
+  .box-count.long { font-size: 16px; }
+}
+@media (max-height: 600px) {
+  .page-home .cover-title { font-size: 24px; max-height: 40vh; }
+  .page-home .cover-goal { font-size: 14px; }
+  .page-home .tray { --front: 44px; min-height: 56px; }
+  .page-home .home-plan { margin: 8px 0; }
+  .page-home { padding-top: calc(env(safe-area-inset-top) + 12px); }
+  .page-home .cover { margin-bottom: 0; }
+  .page-home .cover-goal { line-height: 1.6; }
+  .page-home .shelf { margin-bottom: 4px; }
+}
 .page-home .menu { margin-top: auto; }
 /* today's plan, under the bracket, said only on a day of more than one sitting */
 .home-plan { margin: 16px 0 0; font-size: 16px; font-weight: 700; line-height: 1.6; }
 .home-plan-kicker { margin-right: 12px; color: var(--ink-2); }
+.home-plan-note { margin: -16px 0 24px; font-size: 14px; line-height: 1.6; color: var(--ink-2); }
 .page-home .cover { margin-bottom: 8px; }
 .page-home .home-plan { margin-bottom: 24px; }
 /* a finished day, said in the bar instead of a button that cannot be pressed */
@@ -447,8 +460,8 @@ body {
 }
 .stack { --tone: var(--ink); background: repeating-linear-gradient(to top, var(--tone) 0 19px, var(--paper) 19px 20px); }
 .stack-due { --tone: var(--ink); }
-.stack-wait { --tone: color-mix(in srgb, var(--ink) 62%, var(--paper)); }
-.stack-new { --tone: color-mix(in srgb, var(--ink) 46%, var(--paper)); }
+.stack-wait { --tone: color-mix(in srgb, var(--tint) 55%, var(--ink)); }
+.stack-new { --tone: var(--tint); }
 .stack { position: relative; }
 .stack.capped::after {
   content: "";
@@ -741,8 +754,9 @@ body {
   padding: 8px 0;
   opacity: 1;
   border-radius: 4px;
-  background: var(--ink);
-  color: var(--paper);
+  background: var(--tint);
+  color: var(--ink);
+  border: var(--line) solid var(--ink);
   box-shadow: 0 0 0 2px var(--paper);
   writing-mode: vertical-rl;
   font-style: normal;
@@ -790,6 +804,7 @@ body {
   font-weight: 700;
   line-height: 1.65;
 }
+.v-try-label { margin-right: 8px; font-weight: 700; color: var(--ink-2); }
 .verdict-src { display: flex; flex-wrap: wrap; align-items: center; gap: 0 16px; margin: 4px 0 0; font-size: 12px; color: var(--ink-2); }
 .verdict-src .src-label { font-weight: 700; letter-spacing: 0.02em; }
 .verdict-src a { display: inline-flex; align-items: center; min-height: 28px; color: var(--ink-2); text-underline-offset: 4px; text-decoration-color: var(--rule); }
@@ -910,7 +925,10 @@ body {
 .score-of { font-size: 28px; line-height: 1; color: var(--ink-2); }
 .score-label { font-size: 16px; color: var(--ink-2); margin-left: 4px; }
 .shelf-result { margin: 16px 0 24px; padding-top: 16px; }
-#r-missed-wrap { margin-bottom: 24px; }
+#r-missed-wrap, #r-try-wrap { margin-bottom: 24px; }
+/* a dish to try is a line on a rule, like the list of what comes back */
+.tries { margin: 0; padding: 0; list-style: none; border-top: 2px solid var(--rule); }
+.tries li { padding: 12px 0; border-bottom: 1px solid var(--rule-soft); font-size: 16px; line-height: 1.6; }
 /* on the result only this sitting's cards are at full strength */
 .shelf-result .stack:not(.stack-landed) { opacity: 0.75; }
 
@@ -933,6 +951,15 @@ body {
 /* the separator stays at the end of a line, never at the start of one */
 .schedule .name:not(:last-child):not(:has(+ .more))::after { content: "・"; }
 .schedule .name:has(+ .more)::after { content: " "; white-space: normal; word-spacing: 4px; }
+
+/* the month: a mark on each day answers were given, nothing on the others */
+.cal-wrap { margin-bottom: 24px; }
+.cal-month { margin: 0 0 8px; font-size: 14px; font-weight: 700; color: var(--ink-2); }
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.cal-dow { padding-bottom: 4px; text-align: center; font-size: 12px; color: var(--ink-2); }
+.cal-day { display: grid; place-items: center; aspect-ratio: 1; max-width: 44px; justify-self: center; width: 100%; border-radius: 999px; font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.cal-day.on { background: var(--tint); color: var(--ink); font-weight: 700; box-shadow: inset 0 0 0 var(--line) var(--ink); }
+.cal-day.today:not(.on) { box-shadow: inset 0 0 0 1px var(--rule-soft); }
 
 /* ---------- primer ---------- */
 
@@ -1014,7 +1041,7 @@ body {
   padding: 0;
   list-style: none;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
   gap: 40px 0;
   align-items: end;
 }
