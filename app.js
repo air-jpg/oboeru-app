@@ -25,6 +25,7 @@ const LS = {
   device: 'obo.device',
   dirty: 'obo.dirty.',
   sent: 'obo.sent.',     // how many of this device's answers the last send carried
+  primed: 'obo.primed.', // the set's read was shown before its first sitting
   sets: 'obo.sets',
   notes: 'obo.notes',
 };
@@ -34,8 +35,10 @@ const BACKLOG = 2 * SESSION_LEN;   // reviews waiting beyond this pause new ques
 // New questions per day. Reviews are never capped; new ones are, so a day has
 // an end and tomorrow's reviews stay a size that fits in ten minutes.
 const NEW_PER_DAY = 12;
-// The day's new questions follow how the reviews are going. Learning runs
-// fastest when about 85% of answers come out right (Wilson et al. 2019), so
+// The day's new questions follow how the reviews are going. A model of
+// learning puts the best rate of success near 85% (Wilson et al. 2019, a
+// result from learning machines, taken here as a guide, not a measured human
+// figure), so
 // when the answers to questions last met on an earlier day fall below 80%
 // over the past week, fewer new ones come until the reviews recover. A
 // "わからない" counts as a miss: it says the card did not stay. With a
@@ -325,6 +328,19 @@ function reviewPace() {
   return { n, acc, cap };
 }
 
+/** Whole learning days since the last answer before today, or 0. */
+function daysAway() {
+  const today = Schedule.dayStart(Date.now(), 0);
+  let last = 0;
+  for (const e of S.events.concat(S.remote)) {
+    const t = parseTs(e.ts);
+    if (t < today && t > last) last = t;
+  }
+  if (!last) return 0;
+  const done = S.events.concat(S.remote).some((e) => parseTs(e.ts) >= today);
+  return done ? 0 : Math.round((today - Schedule.dayStart(last, 0)) / Schedule.DAY_MS);
+}
+
 /** New questions still allowed today. */
 function newRoom() {
   return Math.max(0, reviewPace().cap - newToday());
@@ -355,9 +371,12 @@ function pickFresh(fresh, room) {
   if (room <= 0) return [];
   const load = learningLoad();
   const now = Date.now();
-  const order = fresh.some((q) => q.months)
-    ? fresh.filter((q) => inSeason(q, now)).concat(fresh.filter((q) => !inSeason(q, now)))
-    : fresh;
+  // the foods trade places among themselves; the words and reasons between
+  // them keep theirs, so a set's first words still come first
+  const foods = fresh.filter((q) => q.months);
+  const ranked = foods.filter((q) => inSeason(q, now)).concat(foods.filter((q) => !inSeason(q, now)));
+  let k = 0;
+  const order = foods.length ? fresh.map((q) => (q.months ? ranked[k++] : q)) : fresh;
   const out = [];
   const held = [];
   for (const q of order) {
@@ -403,15 +422,23 @@ function buildQueue(opts) {
   const backlog = !extra && !only && due.length > BACKLOG;
   const stOf = (q) => S.qstate.get(q.id);
   due.sort((a, b) => (backlog ? stOf(a).box - stOf(b).box : 0) || stOf(a).due - stOf(b).due);
-  const room = extra ? SESSION_LEN : backlog ? 0 : newRoom();
+  // A day's answers stay near two sittings: new questions fill only what the
+  // reviews waiting and the reviews already answered today leave of BACKLOG.
+  const start = Schedule.dayStart(now, 0);
+  const reviewedToday = new Set(S.events.concat(S.remote)
+    .filter((e) => parseTs(e.ts) >= start && !e.first_seen).map((e) => e.qid)).size;
+  const dayRoom = Math.max(0, BACKLOG - due.length - reviewedToday);
+  const room = extra ? SESSION_LEN : backlog ? 0 : Math.min(newRoom(), dayRoom);
   fresh.splice(0, fresh.length, ...pickFresh(fresh, room));
 
   // Interleave review and new so the session is not two blocks.
   const out = [];
   let i = 0;
   let j = 0;
-  const wantDue = Math.min(due.length, Math.ceil(SESSION_LEN * 0.7));
-  while (out.length < SESSION_LEN && (i < due.length || j < fresh.length)) {
+  // four or fewer left after this sitting join it, so no sitting of two
+  const len = due.length + fresh.length - SESSION_LEN <= 4 ? SESSION_LEN + 4 : SESSION_LEN;
+  const wantDue = Math.min(due.length, Math.ceil(len * 0.7));
+  while (out.length < len && (i < due.length || j < fresh.length)) {
     const takeDue = i < wantDue && (j >= fresh.length || out.length % 3 !== 2);
     if (takeDue && i < due.length) out.push(due[i++]);
     else if (j < fresh.length) out.push(fresh[j++]);
@@ -634,6 +661,7 @@ function record(q, chosen, correct, dunno, ms) {
  *  or the person has asked for less motion. */
 function show(name, opts) {
   const swap = () => {
+    closeTerm();
     for (const el of document.querySelectorAll('.screen')) el.classList.toggle('on', el.id === 'screen-' + name);
     document.documentElement.dataset.screen = name;
     // the long reads sit on a lighter paper
@@ -737,10 +765,13 @@ const AMOUNT = /[0-9０-９][0-9０-９.,]*[〜～~][0-9０-９][0-9０-９.,]*[
 
 /** Put text in an element with a break opportunity at each phrase, so a line
  *  never ends in the middle of a word. word-break: keep-all does the rest. */
-function phrase(el, text) {
+function phrase(el, text, opts) {
   el.textContent = '';
   el.classList.add('phr');
   if (!text) return el;
+  // the set's words a newcomer may not know become buttons that show their
+  // meaning; each word is marked once on a screen (opts.seen)
+  const marks = opts && opts.terms ? findTerms(text, opts.terms, opts.seen) : [];
   const chunks = window.BudouX ? BudouX.parse(text) : [text];
   // a boundary that falls inside a protected word is dropped
   const cuts = [];
@@ -762,11 +793,14 @@ function phrase(el, text) {
   for (const m of text.matchAll(AMOUNT)) {
     for (let k = m.index + 1; k < m.index + m[0].length; k++) banned.add(k);
   }
+  for (const m of marks) {
+    for (let k = m.start + 1; k < m.end; k++) banned.add(k);
+  }
   // the last phrase, when it is only a few characters, stays with the one
   // before it, so a paragraph does not end on a line of its own two or three
   const lastCut = cuts.filter((c) => !banned.has(c)).pop();
   if (lastCut !== undefined && text.length - lastCut <= 4) banned.add(lastCut);
-  const put = (s) => {
+  const plain = (s) => {
     let i = 0;
     for (const m of s.matchAll(AMOUNT)) {
       el.appendChild(document.createTextNode(s.slice(i, m.index)));
@@ -775,15 +809,83 @@ function phrase(el, text) {
     }
     el.appendChild(document.createTextNode(s.slice(i)));
   };
+  // a piece of the text starting at `off`, with any marked word in it as a button
+  const put = (s, off) => {
+    let i = 0;
+    for (const m of marks) {
+      if (m.start < off + i || m.end > off + s.length) continue;
+      plain(s.slice(i, m.start - off));
+      el.appendChild(h('button', { type: 'button', class: 'term', 'data-term': m.term.term,
+        'aria-haspopup': 'dialog', text: text.slice(m.start, m.end) }));
+      i = m.end - off;
+    }
+    plain(s.slice(i));
+  };
   let from = 0;
   for (const c of cuts) {
     if (banned.has(c)) continue;
-    put(text.slice(from, c));
+    put(text.slice(from, c), from);
     el.appendChild(document.createElement('wbr'));
     from = c;
   }
-  put(text.slice(from));
+  put(text.slice(from), from);
   return el;
+}
+
+/* ---------- words: a newcomer's glossary, opened from the text ---------- */
+
+const termOrder = new WeakMap();
+/** The set's words, the longest first so that a longer word wins over a
+ *  shorter one inside it. */
+function setTerms() {
+  const b = S.bank;
+  if (!b || !b.terms || !b.terms.length) return [];
+  if (!termOrder.has(b)) termOrder.set(b, b.terms.slice().sort((x, y) => y.term.length - x.term.length));
+  return termOrder.get(b);
+}
+
+/** Before an answer, a word whose meaning names one of the choices would
+ *  give the answer away, so it is not marked in that question. */
+function termsFor(q) {
+  const texts = (q.options || []).map((o) => o.text);
+  return setTerms().filter((t) => !texts.some((x) => x === t.term || t.def.includes(x) || x.includes(t.term)));
+}
+
+/** The first place each word appears in the text, not overlapping a longer
+ *  word, and not a word already marked on this screen. */
+function findTerms(text, terms, seen) {
+  const out = [];
+  for (const t of terms) {
+    if (seen && seen.has(t.term)) continue;
+    let i = text.indexOf(t.term);
+    while (i !== -1 && out.some((m) => i < m.end && i + t.term.length > m.start)) i = text.indexOf(t.term, i + 1);
+    if (i === -1) continue;
+    out.push({ start: i, end: i + t.term.length, term: t });
+    if (seen) seen.add(t.term);
+  }
+  return out.sort((a, b) => a.start - b.start);
+}
+
+/** Show a word's meaning in the sheet over the dock, or hide it again. */
+function openTerm(btn) {
+  const t = setTerms().find((x) => x.term === btn.dataset.term);
+  const sheet = $('term-sheet');
+  if (!t) return;
+  if (!sheet.hidden && sheet.dataset.term === t.term) return closeTerm();
+  for (const b of document.querySelectorAll('.term[aria-expanded="true"]')) b.setAttribute('aria-expanded', 'false');
+  btn.setAttribute('aria-expanded', 'true');
+  sheet.dataset.term = t.term;
+  $('term-word').textContent = t.term;
+  phrase($('term-def'), t.def);
+  sheet.hidden = false;
+}
+
+function closeTerm() {
+  const sheet = $('term-sheet');
+  if (sheet.hidden) return;
+  sheet.hidden = true;
+  delete sheet.dataset.term;
+  for (const b of document.querySelectorAll('.term[aria-expanded="true"]')) b.setAttribute('aria-expanded', 'false');
 }
 
 /* ---------- the shelf: every question is a card standing in the box it has reached ---------- */
@@ -1019,7 +1121,7 @@ function paintHome() {
 
   const c = counts();
   paintBracket(paintShelf($('shelf-boxes')));
-  phrase($('home-status'), shelfCaption(c) || seasonLine());
+  phrase($('home-status'), seasonLine() || shelfCaption(c));
   const q = buildQueue();
   // the whole of today, under the shelf: what is due and what is new
   const roomToday = q.backlog ? 0 : Math.min(c.fresh, newRoom());
@@ -1027,13 +1129,18 @@ function paintHome() {
   $('home-plan-text').textContent = `${c.due + roomToday}問`;
   // said only when the day is more than this one sitting; otherwise the
   // button already says it
-  $('home-plan').hidden = !plan.length || c.due + roomToday <= q.list.length;
+  // and not when it runs past two sittings, where a large number only weighs
+  // (after days away it read 120); the button says the next sitting either way
+  $('home-plan').hidden = !plan.length || c.due + roomToday <= q.list.length || c.due + roomToday > BACKLOG;
   const note = $('home-plan-note');
   const pace = reviewPace();
   const slower = !q.backlog && pace.cap < NEW_PER_DAY && c.fresh > 0;
   phrase(note, q.backlog ? `復習が${BACKLOG}問を超えたので、減るまで新しい問題は休みます。`
     : slower ? `この7日の復習の正答率が${Math.round(pace.acc * 100)}%なので、新しい問題を1日${pace.cap}問にしています。` : '');
-  note.hidden = !(q.backlog || slower);
+  // back after days away: said, not scored (research/life-learning-science.txt L-55)
+  const away = daysAway();
+  if (!q.backlog && !slower && away >= 3) phrase(note, `${away}日ぶりの再開です。間隔の短い札から出します。`);
+  note.hidden = !(q.backlog || slower || away >= 3);
   const start = $('btn-start');
   const unseen = S.bank.questions.filter((x) => !S.qstate.has(x.id)).length;
   $('home-done').hidden = !!q.list.length;
@@ -1057,6 +1164,19 @@ function paintHome() {
 /* ---------- quiz ---------- */
 
 function startSession(opts) {
+  // A set's read comes once before its first sitting: the words and the idea
+  // that the questions lean on, met before them (research/life-learning-
+  // science.txt, pre-training and advance organisers). It is not asked again.
+  const b = S.bank;
+  if (b.primer && b.primer.length && S.qstate.size === 0 && !readLS(LS.primed + S.cfg.domain, false)
+      && !(opts && opts.afterPrimer)) {
+    writeLS(LS.primed + S.cfg.domain, true);
+    S.primerThenStart = true;
+    paintPrimer();
+    show('primer');
+    return;
+  }
+  S.primerThenStart = false;
   const q = buildQueue(opts);
   const firstN = q.list.length;
   if (!q.list.length) {
@@ -1109,6 +1229,7 @@ function fitPrompt() {
 }
 
 function paintQuestion() {
+  closeTerm();
   const s = S.session;
   const { q, again } = s.queue[s.idx];
   s.answered = false;
@@ -1125,7 +1246,8 @@ function paintQuestion() {
   kicker.innerHTML = '';
   if (flag) kicker.appendChild(h('span', { class: 'flag', text: flag }));
   for (const part of [place, typeLabel].filter(Boolean)) kicker.appendChild(h('span', { text: part }));
-  phrase($('q-prompt'), q.prompt);
+  S.seenTerms = new Set();
+  phrase($('q-prompt'), q.prompt, { terms: termsFor(q), seen: S.seenTerms });
   const area = $('q-area');
   area.classList.remove('answered', 'spill', 'low');
   clearTimeout(S.moveTimer);
@@ -1139,7 +1261,9 @@ function paintQuestion() {
 
   const box = $('q-choices');
   box.innerHTML = '';
-  const opts = shuffle(q.options, q.id);
+  // a new order at each meeting, so a card is not answered by where its
+  // answer sat last time; the same order if the page is reopened mid-question
+  const opts = shuffle(q.options, `${q.id}:${st ? st.seen : 0}${again ? ':again' : ''}`);
   opts.forEach((opt, i) => {
     const btn = h('button', { type: 'button', class: 'choice', 'data-key': String(i + 1) },
       h('span', { class: 'choice-key', text: String(i + 1), 'aria-hidden': 'true' }),
@@ -1166,7 +1290,11 @@ function paintQuestion() {
   // before the answer: the shelf, with this question's card lifted out of
   // the box it is in; the answer will move it
   const here = st ? st.box : 0;
-  paintShelf($('stage-shelf'), { current: q.id, currentLabel: q.item_name || '' });
+  // the card's name must not give the answer away: when it holds a choice
+  // (an item named for the very word asked), the card carries its kind instead
+  const name = q.item_name || '';
+  const leaks = name && (q.options || []).some((o) => name.includes(o.text) || o.text.includes(name));
+  paintShelf($('stage-shelf'), { current: q.id, currentLabel: leaks ? typeLabel : name });
   const lastBox = intervals().length - 1;
   $('q-where').textContent = !st ? `はじめて出る札。正解で${boxLabel(1)}の箱へ`
     : here >= lastBox ? `いま${boxLabel(here)}の箱。正解でここに残る`
@@ -1201,7 +1329,7 @@ function answer(opt, btn) {
   const before = S.qstate.get(q.id);
   const fromBox = before ? before.box : 0;
   const st = record(q, opt ? opt.text : null, correct, !opt, ms);
-  s.answers[s.idx] = { q, correct, dunno: !opt, due: st.due, box: st.box, chosen: opt, why: opt && !correct ? backOf(q, opt) : '' };
+  s.answers[s.idx] = { q, correct, dunno: !opt, due: st.due, box: st.box, chosen: opt, why: opt && !correct ? backOf(q, opt) : '', firstSight: !before };
 
   // A miss comes back before the sitting ends, once, a few questions on.
   let reasked = false;
@@ -1257,11 +1385,15 @@ function answer(opt, btn) {
   $('q-page').classList.add('answered');
 
   const v = $('q-verdict');
-  $('q-judge').dataset.tone = correct ? 'ok' : 'ng';
-  $('v-head').textContent = correct ? '正解' : opt ? '不正解' : '答えは丸の選択肢';
+  // A question met for the first time works as a pretest: guessing wrong or
+  // not knowing, then reading the answer, is how it is learnt, so a first
+  // meeting that misses carries no cross (it is still recorded as a miss).
+  const firstMiss = !correct && !before;
+  $('q-judge').dataset.tone = correct ? 'ok' : firstMiss ? 'new' : 'ng';
+  $('v-head').textContent = correct ? '正解' : firstMiss ? '初めて' : opt ? '不正解' : '答えは丸の選択肢';
   const vm = $('v-mark');
   vm.innerHTML = '';
-  vm.appendChild(svgUse(correct ? `maru-${variant}` : `batsu-${variant}`, correct ? 'judge-pen' : 'judge-pen batsu'));
+  if (!firstMiss) vm.appendChild(svgUse(correct ? `maru-${variant}` : `batsu-${variant}`, correct ? 'judge-pen' : 'judge-pen batsu'));
   $('v-said').textContent = correct ? '' : `正解は${q.answer}。`;
   // one line under the mark: where the card went, or when it comes back
   // a long name would break the line; then the card is just this card
@@ -1276,9 +1408,9 @@ function answer(opt, btn) {
   cw.hidden = !chosenWhy;
   cw.textContent = '';
   if (chosenWhy) {
-    cw.append(h('span', { class: 'v-chosen-label', text: `選んだ「${opt.text}」` }), phrase(h('span'), chosenWhy));
+    cw.append(h('span', { class: 'v-chosen-label', text: `選んだ「${opt.text}」` }), phrase(h('span'), chosenWhy, { terms: setTerms(), seen: S.seenTerms }));
   }
-  phrase($('v-text'), q.explain || '');
+  phrase($('v-text'), q.explain || '', { terms: setTerms(), seen: S.seenTerms });
   // one more line: the set's rule of thumb on its core question, or else a
   // dish to cook with what this question teaches
   const aside = $('v-aside');
@@ -1479,16 +1611,38 @@ function next() {
 
 /* ---------- result ---------- */
 
+/** Questions whose first answer was a miss or "わからない" and that are now
+ *  known: the pretest's benefit, which learners do not notice unless their
+ *  own results are put side by side (research/life-learning-science.txt). */
+function grownCount() {
+  const firstOk = new Map();
+  const all = S.events.concat(S.remote).slice().sort((a, b) => parseTs(a.ts) - parseTs(b.ts));
+  for (const e of all) if (!firstOk.has(e.qid)) firstOk.set(e.qid, !!e.correct);
+  let n = 0;
+  for (const [qid, ok] of firstOk) if (!ok && Schedule.known(S.qstate.get(qid))) n += 1;
+  return n;
+}
+
 function finish() {
   const s = S.session;
   const first = s.answers.filter((a, i) => a && !s.queue[i].again);
-  const right = first.filter((a) => a.correct).length;
+  // Reviews are what the score counts; a question met for the first time is
+  // a pretest, not a test, so it is counted as met, not as passed or failed.
+  const reviews = first.filter((a) => !a.firstSight);
+  const met = first.length - reviews.length;
+  const right = reviews.filter((a) => a.correct).length;
   const score = $('r-score');
   score.innerHTML = '';
-  score.append(
-    h('span', { class: 'score-num', text: String(right) }),
-    h('span', { class: 'score-of', text: `/${first.length}` }),
-    h('span', { class: 'score-label', text: '問を1回で正解' }));
+  if (reviews.length) {
+    score.append(
+      h('span', { class: 'score-num', text: String(right) }),
+      h('span', { class: 'score-of', text: `/${reviews.length}` }),
+      h('span', { class: 'score-label', text: met ? `問を思い出せた。初めての問題は${met}問` : '問を思い出せた' }));
+  } else {
+    score.append(
+      h('span', { class: 'score-num', text: String(met) }),
+      h('span', { class: 'score-label', text: '問に初めて会った' }));
+  }
   const mins = Math.max(1, Math.round((Date.now() - s.startedAt) / 60000));
   // when this sitting's cards come back, all of them, earliest first
   const backs = new Map();
@@ -1499,9 +1653,11 @@ function finish() {
     backs.set(w, (backs.get(w) || 0) + 1);
   }
   const parts = [...backs].slice(0, 2).map(([w, n]) => `${w}に${n}問`);
-  phrase($('r-note'), parts.length
+  const grown = grownCount();
+  phrase($('r-note'), (parts.length
     ? `${mins}分で解きました。次は${parts.join('と')}が出ます。`
-    : `${mins}分で解きました。`);
+    : `${mins}分で解きました。`)
+    + (grown ? `初めは答えられなかった問題のうち${grown}問が${boxLabel(READY_FROM)}以上の箱に入っています。` : ''));
 
   // the shelf again, with this sitting's cards dropping into their boxes
   const landed = new Set(s.answers.filter(Boolean).map((a) => a.q.id));
@@ -1576,6 +1732,7 @@ function finish() {
   if (more) phrase($('r-note'), `${mins}分で解きました。今日はあと${left}問あります。`);
   $('r-kicker').textContent = `今回の${first.length}問`;
   $('r-side-title').textContent = S.bank.cover_title || S.bank.short_title || '';
+  S.resultAt = Date.now();
   show('result');
   paintSyncNote();
   pushEvents();
@@ -1588,13 +1745,14 @@ function paintPrimer() {
   const host = $('primer-body');
   host.innerHTML = '';
   host.appendChild(h('h1', { class: 'title', id: 'primer-title', text: b.short_title || b.title }));
+  const seen = new Set();
   for (const block of b.primer || []) {
     if (typeof block === 'string') {
-      host.appendChild(phrase(h('p'), block));
+      host.appendChild(phrase(h('p'), block, { terms: setTerms(), seen }));
     } else if (block.h) {
       host.appendChild(h('h2', { class: 'section-title', text: block.h }));
     } else if (block.p) {
-      host.appendChild(phrase(h('p'), block.p));
+      host.appendChild(phrase(h('p'), block.p, { terms: setTerms(), seen }));
     } else if (block.pair) {
       // two families side by side, and the rule that joins them
       const col = (side) => h('div', { class: 'pair-col' },
@@ -1617,6 +1775,12 @@ function paintPrimer() {
       host.appendChild(h('dl', { class: 'rows' }, block.rows.map(([k, v]) =>
         h('div', { class: 'rows-row' }, h('dt', { text: k }), phrase(h('dd'), v)))));
     }
+  }
+  if (S.primerThenStart) {
+    host.appendChild(h('section', { class: 'primer-start' },
+      phrase(h('p'), '知らない問題は見当で選んでも「わからない」でもかまいません。見当で選ぶと、答えを見たときに覚えやすくなります。'),
+      h('button', { class: 'btn btn-ink', id: 'btn-primer-start', type: 'button', text: '問題を始める' })));
+    $('btn-primer-start').addEventListener('click', () => startSession({ afterPrimer: true }));
   }
 }
 
@@ -1965,6 +2129,14 @@ function wire() {
   });
 
   $('btn-start').addEventListener('click', () => startSession());
+  // a marked word opens its meaning; a tap anywhere else, or Escape, closes it
+  document.addEventListener('click', (e) => {
+    const word = e.target.closest('.term');
+    if (word) return openTerm(word);
+    if (!e.target.closest('#term-sheet')) closeTerm();
+  });
+  $('term-close').addEventListener('click', closeTerm);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeTerm(); });
   $('btn-more').addEventListener('click', () => startSession({ extra: true }));
   $('btn-next').addEventListener('click', next);
   $('btn-dunno').addEventListener('click', () => { if (!tooSoon()) answer(null, null); });
@@ -1978,6 +2150,8 @@ function wire() {
   $('btn-quit').addEventListener('click', goHome);
   $('btn-again').addEventListener('click', goHome);
   $('btn-home').addEventListener('click', () => {
+    // a second tap on the last "次の問題" must not start the next sitting
+    if (Date.now() - (S.resultAt || 0) < TAP_GUARD_MS) return;
     if (S.screen === 'result' && S.resultGoesOn && buildQueue().list.length) startSession();
     else goHome();
   });

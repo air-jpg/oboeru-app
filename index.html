@@ -14,7 +14,7 @@
 <link rel="icon" href="icon-192.png">
 <link rel="preload" href="line-seed-jp-400.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="line-seed-jp-700.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="app.css?v=f286f372">
+<link rel="stylesheet" href="app.css?v=2fa57868">
 </head>
 <body>
 
@@ -169,7 +169,7 @@
         <div class="shelf-boxes" id="r-shelf-boxes"></div>
       </figure>
       <section id="r-missed-wrap" hidden>
-        <h2 class="section-title">間違えた問題</h2>
+        <h2 class="section-title">もう一度見る問題</h2>
         <ol class="missed" id="r-missed"></ol>
       </section>
       <section id="r-try-wrap" hidden>
@@ -236,11 +236,17 @@
     </div>
   </section>
 
+  <!-- 言葉の意味: 本文の印のある言葉を押すと下の帯の上に出る -->
+  <div class="term-sheet" id="term-sheet" role="dialog" aria-labelledby="term-word" hidden>
+    <p class="term-word" id="term-word"></p>
+    <p class="term-def" id="term-def"></p>
+    <button class="term-close" id="term-close" type="button">閉じる</button>
+  </div>
 </main>
 
 <noscript><p style="padding:24px">このページは JavaScript が必要です。</p></noscript>
-<script src="schedule.js?v=f286f372"></script>
-<script src="budoux-ja.js?v=f286f372"></script>
-<script src="app.js?v=f286f372"></script>
+<script src="schedule.js?v=2fa57868"></script>
+<script src="budoux-ja.js?v=2fa57868"></script>
+<script src="app.js?v=2fa57868"></script>
 </body>
 </html>

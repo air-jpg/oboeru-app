@@ -14,6 +14,10 @@
  *   a correct answer given before the card was due does not move it up once it
  *   has reached box 2; repeating a card minutes after getting it right is not
  *   evidence that it will still be there tomorrow
+ *   a correct answer to a card missed earlier the same learning day keeps the
+ *   box it fell to (box 1 at least) and waits that box's gap; getting it right
+ *   three questions after reading the answer is not evidence either, and
+ *   without this a card missed on a week's gap went straight back to a week
  *
  * Why the fall is not all the way down
  *   WaniKani drops a card by one step below its fifth stage and by two above
@@ -95,7 +99,11 @@
   function apply(st, correct, tsMs, intervals, deadlineMs, fractions) {
     const ivs = intervals && intervals.length ? intervals : DEFAULT_INTERVALS;
     const early = st.due !== null && tsMs < st.due;
-    if (correct) {
+    const relearn = st.lastCorrect === false && dayStart(st.lastTs, 0) === dayStart(tsMs, 0);
+    if (correct && relearn) {
+      st.box = Math.max(st.box, 1);
+      st.due = dueAfter(st.box, tsMs, ivs, deadlineMs, fractions);
+    } else if (correct) {
       if (early && st.box >= READY_BOX) {
         // leave box and due as they are
       } else {
