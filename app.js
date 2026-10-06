@@ -1046,9 +1046,11 @@ function nextReviewLine(nextDue) {
 function seasonLine() {
   const m = new Date().getMonth() + 1;
   // take the kinds in turn (vegetables, fish) so one kind does not fill the line
+  const conf = S.bank.season || {};
   const lanes = new Map();
   for (const it of S.bank.items) {
     if (!it.months || !it.months.includes(m)) continue;
+    if (conf.types && !conf.types.includes(it.type)) continue;
     if (!lanes.has(it.type)) lanes.set(it.type, []);
     lanes.get(it.type).push(it.short_name || it.name);
   }
@@ -1058,7 +1060,8 @@ function seasonLine() {
   }
   if (!names.length) return '';
   const shown = names.slice(0, 5);
-  return `${m}月が旬 ${shown.join('・')}${names.length > shown.length ? 'など' : ''}`;
+  const label = (conf.label || '{m}月が旬').replace('{m}', m);
+  return `${label} ${shown.join('・')}${names.length > shown.length ? 'など' : ''}`;
 }
 
 /** One line under the shelf: what is due now, or when the next card is. */
