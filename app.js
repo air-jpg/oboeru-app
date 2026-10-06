@@ -1728,7 +1728,8 @@ function finish() {
   $('screen-result').classList.toggle('goes-on', more > 0);
   $('btn-home').textContent = more ? `続けて${Math.min(more, SESSION_LEN)}問を解く` : 'ホームに戻る';
   $('btn-again').hidden = !more;
-  $('btn-again').textContent = 'ホームに戻る';
+  // ending here weighs the same as going on: the choice is the learner's
+  $('btn-again').textContent = 'ここで終える';
   if (more) phrase($('r-note'), `${mins}分で解きました。今日はあと${left}問あります。`);
   $('r-kicker').textContent = `今回の${first.length}問`;
   $('r-side-title').textContent = S.bank.cover_title || S.bank.short_title || '';
@@ -1854,6 +1855,14 @@ function paintBrowse() {
         body);
       ul.appendChild(h('li', {}, details));
     }
+  }
+  // the set's words at the end, in the order they were written, for looking
+  // one up again after its meaning was opened in a question
+  const words = (b.terms || []);
+  if (words.length) {
+    host.appendChild(h('h2', { class: 'section-title browse-type' }, h('span', { text: '言葉' })));
+    host.appendChild(h('dl', { class: 'rows words' }, words.map((w) =>
+      h('div', { class: 'rows-row' }, h('dt', { text: w.term }), phrase(h('dd'), w.def)))));
   }
 }
 

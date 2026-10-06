@@ -1211,3 +1211,13 @@ body {
 .primer-start { margin: 48px 0 0; padding: 24px 0 0; border-top: 2px solid var(--ink); }
 .primer-start p { margin: 0 0 20px; font-size: 15px; line-height: 1.8; color: var(--ink-2); }
 .primer-start .btn { width: 100%; }
+
+/* the result's two ways on, side by side and the same size */
+.dock-result:has(#btn-again:not([hidden])) { grid-template-columns: 1fr 1fr; }
+.dock-result .btn { padding-inline: 12px; }
+
+/* the set's words at the end of the list */
+.words { margin: 0 0 24px; }
+.words .rows-row { padding: 12px 0; border-bottom: 1px solid var(--rule); }
+.words dt { font-weight: 700; color: var(--ink); }
+.words dd { margin: 4px 0 0; color: var(--ink-2); line-height: 1.7; }
