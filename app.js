@@ -832,6 +832,61 @@ function phrase(el, text, opts) {
   return el;
 }
 
+/* ---------- chord boxes ---------- */
+
+/** A chord box drawn from a fret string, sixth string first: "x32010".
+ *  x is a string not played, 0 an open string, a number the fret. Five
+ *  frets are shown; when the shape sits higher up, its lowest fret is named
+ *  beside the box. Built as SVG element by element, no markup inserted. */
+function chordBox(f, name) {
+  const ns = 'http://www.w3.org/2000/svg';
+  const el = (tag, attrs) => {
+    const e = document.createElementNS(ns, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
+    return e;
+  };
+  // one character a string ("x32010"), or commas when a fret runs past 9
+  const cells = String(f).includes(',') ? String(f).split(',') : String(f).split('');
+  const frets = cells.map((c) => (c === 'x' || c === 'X' ? null : Number(c)));
+  const pressed = frets.filter((n) => n > 0);
+  const top = pressed.length && Math.max(...pressed) > 5 ? Math.min(...pressed) : 1;
+  const W = 120; const H = 132; const left = 22; const gap = 15; const y0 = 30; const row = 18; const rows = 5;
+  const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, class: 'chord-box', role: 'img',
+    'aria-label': `${name ? `${name}の` : ''}押さえ方 ${cells.join(' ')}` });
+  for (let s = 0; s < 6; s++) svg.appendChild(el('line', { x1: left + s * gap, y1: y0, x2: left + s * gap, y2: y0 + rows * row, class: 'cb-line' }));
+  for (let r = 0; r <= rows; r++) {
+    svg.appendChild(el('line', { x1: left, y1: y0 + r * row, x2: left + 5 * gap, y2: y0 + r * row,
+      class: r === 0 && top === 1 ? 'cb-nut' : 'cb-line' }));
+  }
+  if (top > 1) {
+    const t = el('text', { x: 4, y: y0 + row * 0.7, class: 'cb-fret' });
+    t.textContent = String(top);
+    svg.appendChild(t);
+  }
+  frets.forEach((n, s) => {
+    const x = left + s * gap;
+    if (n === null) {
+      // drawn rather than typed, so the cross and the ring keep one size
+      const c = y0 - 11; const d = 4;
+      svg.appendChild(el('line', { x1: x - d, y1: c - d, x2: x + d, y2: c + d, class: 'cb-mark' }));
+      svg.appendChild(el('line', { x1: x - d, y1: c + d, x2: x + d, y2: c - d, class: 'cb-mark' }));
+    } else if (n === 0) {
+      svg.appendChild(el('circle', { cx: x, cy: y0 - 11, r: 4.5, class: 'cb-ring' }));
+    } else {
+      svg.appendChild(el('circle', { cx: x, cy: y0 + (n - top + 0.5) * row, r: 6, class: 'cb-dot' }));
+    }
+  });
+  return svg;
+}
+
+function paintChord(host, d, show) {
+  host.textContent = '';
+  host.hidden = !(d && show);
+  if (!d || !show) return;
+  host.appendChild(chordBox(d.f, d.name));
+  if (d.name && d.at !== 'prompt') host.appendChild(h('p', { class: 'chord-name', text: d.name }));
+}
+
 /* ---------- words: a newcomer's glossary, opened from the text ---------- */
 
 const termOrder = new WeakMap();
@@ -1251,6 +1306,9 @@ function paintQuestion() {
   for (const part of [place, typeLabel].filter(Boolean)) kicker.appendChild(h('span', { text: part }));
   S.seenTerms = new Set();
   phrase($('q-prompt'), q.prompt, { terms: termsFor(q), seen: S.seenTerms });
+  // a shape asked about stands under the question; its name is not shown
+  paintChord($('q-chord'), q.diagram, q.diagram && q.diagram.at === 'prompt');
+  paintChord($('v-chord'), null, false);
   const area = $('q-area');
   area.classList.remove('answered', 'spill', 'low');
   clearTimeout(S.moveTimer);
@@ -1414,6 +1472,8 @@ function answer(opt, btn) {
     cw.append(h('span', { class: 'v-chosen-label', text: `選んだ「${opt.text}」` }), phrase(h('span'), chosenWhy, { terms: setTerms(), seen: S.seenTerms }));
   }
   phrase($('v-text'), q.explain || '', { terms: setTerms(), seen: S.seenTerms });
+  // the answer's shape, seen once more with its name
+  paintChord($('v-chord'), q.diagram, q.diagram && q.diagram.at !== 'prompt');
   // one more line: the set's rule of thumb on its core question, or else a
   // dish to cook with what this question teaches
   const aside = $('v-aside');

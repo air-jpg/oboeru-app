@@ -1221,3 +1221,21 @@ body {
 .words .rows-row { padding: 12px 0; border-bottom: 1px solid var(--rule); }
 .words dt { font-weight: 700; color: var(--ink); }
 .words dd { margin: 4px 0 0; color: var(--ink-2); line-height: 1.7; }
+
+/* chord boxes: a shape under the question or with the explanation */
+.chord-fig { display: flex; align-items: center; gap: 12px; margin: 8px 0 0; }
+.chord-fig[hidden] { display: none; }
+.chord-box { width: 96px; height: auto; flex: none; }
+.cb-line { stroke: var(--ink); stroke-width: 1.4; }
+.cb-nut { stroke: var(--ink); stroke-width: 5; }
+.cb-dot { fill: var(--ink); }
+.cb-mark { stroke: var(--ink); stroke-width: 1.6; stroke-linecap: round; }
+.cb-ring { fill: none; stroke: var(--ink); stroke-width: 1.4; }
+.cb-fret { font-size: 12px; fill: var(--ink-2); font-family: var(--gothic); }
+.chord-name { margin: 0; font-size: 20px; font-weight: 700; color: var(--ink); }
+/* after the answer the shape sits beside the explanation so the choices stay in view */
+.verdict { display: flow-root; }
+#v-chord { float: right; flex-direction: column; gap: 2px; margin: 0 0 4px 12px; }
+#v-chord .chord-box { width: 72px; }
+#q-chord .chord-box { width: 116px; }
+#v-chord .chord-name { font-size: 15px; line-height: 1.2; }
