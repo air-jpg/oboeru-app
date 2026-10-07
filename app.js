@@ -1904,7 +1904,9 @@ function paintBrowse() {
       const townName = it.town ? (b.items.find((x) => x.id === it.town) || {}).name : '';
       const meta = [townName, it.kind].filter(Boolean).join('・');
       const facets = Object.entries(it.facets || {}).filter(([, fx]) => fx && fx.answer);
-      const body = h('div', { class: 'entry-body' },
+      const shape = it.diagram ? h('div', { class: 'chord-fig entry-chord' }) : null;
+      if (shape) paintChord(shape, { ...it.diagram, at: 'after' }, true);
+      const body = h('div', { class: 'entry-body' }, shape,
         h('dl', { class: 'rows' }, facets.map(([key, fx]) =>
           h('div', { class: 'rows-row' }, h('dt', { text: fx.label || key }), phrase(h('dd'), fx.text || fx.answer)))),
         it.hitokoto ? phrase(h('p', { class: 'entry-note' }), it.hitokoto) : null,
