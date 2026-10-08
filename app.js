@@ -929,6 +929,20 @@ function paintMap(host, m, show, name) {
   if (name) host.appendChild(h('p', { class: 'chord-name', text: name }));
 }
 
+/** A made-up back label of a bottle, read in the question: {"title": "…",
+ *  "rows": [["精米歩合", "55%"], …]}. The words are the ones a real label
+ *  must or may carry; the brewery is never a real one. */
+function paintLabel(host, d, show) {
+  host.textContent = '';
+  host.hidden = !(d && show);
+  if (host.hidden) return;
+  const card = h('div', { class: 'label-card', role: 'group', 'aria-label': 'ラベル' });
+  if (d.title) card.appendChild(h('p', { class: 'label-title', text: d.title }));
+  card.appendChild(h('dl', { class: 'label-rows' }, (d.rows || []).map(([k, v]) =>
+    h('div', { class: 'label-row' }, h('dt', { text: k }), h('dd', { text: v })))));
+  host.appendChild(card);
+}
+
 function paintChord(host, d, show) {
   host.textContent = '';
   host.hidden = !(d && show);
@@ -962,8 +976,12 @@ function findTerms(text, terms, seen) {
   const out = [];
   for (const t of terms) {
     if (seen && seen.has(t.term)) continue;
+    // "skip" lists longer words that start with the term but mean something
+    // else (冷やして is not 冷や, the sake at room temperature)
+    const taken = (i) => out.some((m) => i < m.end && i + t.term.length > m.start)
+      || (t.skip || []).some((s) => text.startsWith(s, i));
     let i = text.indexOf(t.term);
-    while (i !== -1 && out.some((m) => i < m.end && i + t.term.length > m.start)) i = text.indexOf(t.term, i + 1);
+    while (i !== -1 && taken(i)) i = text.indexOf(t.term, i + 1);
     if (i === -1) continue;
     out.push({ start: i, end: i + t.term.length, term: t });
     if (seen) seen.add(t.term);
@@ -1164,6 +1182,9 @@ function seasonLine() {
     for (const l of lanes.values()) if (l[i]) names.push(l[i]);
   }
   if (!names.length) return '';
+  // "ひやおろしの火入れ" says nothing the line does not with "ひやおろし"
+  const plain = names.filter((n) => !names.some((o) => o !== n && n.startsWith(`${o}の`)));
+  names.splice(0, names.length, ...plain);
   const shown = names.slice(0, 5);
   const label = (conf.label || '{m}月が旬').replace('{m}', m);
   return `${label} ${shown.join('・')}${names.length > shown.length ? 'など' : ''}`;
@@ -1360,6 +1381,7 @@ function paintQuestion() {
   paintChord($('q-chord'), q.diagram, q.diagram && q.diagram.at === 'prompt');
   paintChord($('v-chord'), null, false);
   paintMap($('q-map'), q.map, q.map && q.map.at === 'prompt');
+  paintLabel($('q-label'), q.label, !!q.label);
   paintMap($('v-map'), null, false);
   const area = $('q-area');
   area.classList.remove('answered', 'spill', 'low');
@@ -1530,6 +1552,7 @@ function answer(opt, btn) {
   // the large map under the question folds into the small one beside the
   // explanation, so the explanation still fits above the choices
   if (q.map && q.map.at === 'prompt') $('q-map').hidden = true;
+  if (q.label) $('q-label').hidden = true;
   // one more line: the set's rule of thumb on its core question, or else a
   // dish to cook with what this question teaches
   const aside = $('v-aside');
