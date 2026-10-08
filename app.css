@@ -1240,4 +1240,17 @@ body {
 #q-chord .chord-box { width: 116px; }
 .entry-chord { margin: 4px 0 8px; }
 .entry-chord .chord-box { width: 88px; }
+/* maps: a region of Japan with one place in the set's tint */
+.map-fig { margin: 8px 0 0; }
+.map-fig[hidden] { display: none; }
+.map-box { display: block; width: 100%; height: auto; max-height: 220px; }
+.map-off { fill: var(--paper); stroke: var(--rule-soft); }
+.map-near { fill: var(--press); stroke: var(--ink-2); }
+.map-on { fill: var(--tint); stroke: var(--ink); }
+.map-ring { fill: none; stroke: var(--ink); }
+.map-inset { fill: none; stroke: var(--rule-soft); }
+#v-map { float: right; flex-direction: column; gap: 2px; margin: 0 0 4px 12px; }
+#v-map .map-box { width: 96px; max-height: 110px; }
+#v-map .chord-name { font-size: 15px; line-height: 1.2; }
+.entry-map .map-box { width: 160px; max-height: 160px; }
 #v-chord .chord-name { font-size: 15px; line-height: 1.2; }

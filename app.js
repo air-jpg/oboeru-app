@@ -879,6 +879,56 @@ function chordBox(f, name) {
   return svg;
 }
 
+/** A map of Japan zoomed to a region, with one place coloured. m is
+ *  {"id": "pref-kagawa", "near": [ids of the region]}; the outlines are in
+ *  japan-map.js. A place too small to see at this size gets a ring. */
+function mapBox(m, name) {
+  const J = self.JAPAN_MAP;
+  const ns = 'http://www.w3.org/2000/svg';
+  const el = (tag, attrs) => {
+    const e = document.createElementNS(ns, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
+    return e;
+  };
+  const boxes = (m.near || [m.id]).map((id) => J.boxes[id]).filter(Boolean);
+  let x0 = Math.min(...boxes.map((b) => b[0]));
+  let y0 = Math.min(...boxes.map((b) => b[1]));
+  let x1 = Math.max(...boxes.map((b) => b[0] + b[2]));
+  let y1 = Math.max(...boxes.map((b) => b[1] + b[3]));
+  // a little of the land around, and never narrower than tall by much
+  const pad = Math.max(x1 - x0, y1 - y0) * 0.12;
+  x0 -= pad; y0 -= pad; x1 += pad; y1 += pad;
+  if (x1 - x0 < (y1 - y0) * 0.8) { const c = (x0 + x1) / 2; const w = (y1 - y0) * 0.8; x0 = c - w / 2; x1 = c + w / 2; }
+  const W = x1 - x0;
+  const svg = el('svg', { viewBox: `${x0.toFixed(1)} ${y0.toFixed(1)} ${W.toFixed(1)} ${(y1 - y0).toFixed(1)}`,
+    class: 'map-box', role: 'img', 'aria-label': name ? `${name}の位置の地図` : '色を付けた所がある地図' });
+  const stroke = (W / 300).toFixed(2);
+  for (const [id, d] of Object.entries(J.prefs)) {
+    svg.appendChild(el('path', { d, class: id === m.id ? 'map-on' : (m.near || []).includes(id) ? 'map-near' : 'map-off',
+      'stroke-width': stroke }));
+  }
+  if ((m.near || []).includes('pref-okinawa') || m.id === 'pref-okinawa') {
+    const [ix, iy, iw, ih] = J.inset;
+    // Okinawa's islands are specks at this size, so its box is what is drawn heavy
+    svg.appendChild(el('rect', { x: ix, y: iy, width: iw, height: ih, class: m.id === 'pref-okinawa' ? 'map-ring' : 'map-inset',
+      'stroke-width': m.id === 'pref-okinawa' ? (W / 120).toFixed(2) : stroke }));
+  }
+  const b = J.boxes[m.id];
+  if (b && m.id !== 'pref-okinawa' && Math.max(b[2], b[3]) < W * 0.08) {
+    svg.appendChild(el('circle', { cx: b[0] + b[2] / 2, cy: b[1] + b[3] / 2, r: Math.max(b[2], b[3]) / 2 + W * 0.04,
+      class: 'map-ring', 'stroke-width': (W / 120).toFixed(2) }));
+  }
+  return svg;
+}
+
+function paintMap(host, m, show, name) {
+  host.textContent = '';
+  host.hidden = !(m && show && self.JAPAN_MAP);
+  if (host.hidden) return;
+  host.appendChild(mapBox(m, name));
+  if (name) host.appendChild(h('p', { class: 'chord-name', text: name }));
+}
+
 function paintChord(host, d, show) {
   host.textContent = '';
   host.hidden = !(d && show);
@@ -1309,6 +1359,8 @@ function paintQuestion() {
   // a shape asked about stands under the question; its name is not shown
   paintChord($('q-chord'), q.diagram, q.diagram && q.diagram.at === 'prompt');
   paintChord($('v-chord'), null, false);
+  paintMap($('q-map'), q.map, q.map && q.map.at === 'prompt');
+  paintMap($('v-map'), null, false);
   const area = $('q-area');
   area.classList.remove('answered', 'spill', 'low');
   clearTimeout(S.moveTimer);
@@ -1474,6 +1526,10 @@ function answer(opt, btn) {
   phrase($('v-text'), q.explain || '', { terms: setTerms(), seen: S.seenTerms });
   // the answer's shape, seen once more with its name
   paintChord($('v-chord'), q.diagram, q.diagram && q.diagram.at !== 'prompt');
+  paintMap($('v-map'), q.map, !!q.map, q.map && (S.bank.items.find((x) => x.id === q.map.id) || {}).name);
+  // the large map under the question folds into the small one beside the
+  // explanation, so the explanation still fits above the choices
+  if (q.map && q.map.at === 'prompt') $('q-map').hidden = true;
   // one more line: the set's rule of thumb on its core question, or else a
   // dish to cook with what this question teaches
   const aside = $('v-aside');
@@ -1903,10 +1959,21 @@ function paintBrowse() {
       const done = qs.filter((q) => Schedule.known(S.qstate.get(q.id))).length;
       const townName = it.town ? (b.items.find((x) => x.id === it.town) || {}).name : '';
       const meta = [townName, it.kind].filter(Boolean).join('・');
-      const facets = Object.entries(it.facets || {}).filter(([, fx]) => fx && fx.answer);
+      // a row that says what another row already said is left out (the map
+      // question of a prefecture borrows the words of where it lies)
+      const said = new Set();
+      const facets = Object.entries(it.facets || {}).filter(([, fx]) => {
+        if (!fx || !fx.answer) return false;
+        const words = fx.text || fx.answer;
+        if (said.has(words)) return false;
+        said.add(words);
+        return true;
+      });
       const shape = it.diagram ? h('div', { class: 'chord-fig entry-chord' }) : null;
       if (shape) paintChord(shape, { ...it.diagram, at: 'after' }, true);
-      const body = h('div', { class: 'entry-body' }, shape,
+      const place = it.map && self.JAPAN_MAP ? h('div', { class: 'chord-fig entry-chord entry-map' }) : null;
+      if (place) paintMap(place, it.map, true);
+      const body = h('div', { class: 'entry-body' }, shape, place,
         h('dl', { class: 'rows' }, facets.map(([key, fx]) =>
           h('div', { class: 'rows-row' }, h('dt', { text: fx.label || key }), phrase(h('dd'), fx.text || fx.answer)))),
         it.hitokoto ? phrase(h('p', { class: 'entry-note' }), it.hitokoto) : null,
