@@ -28,6 +28,8 @@ const LS = {
   primed: 'obo.primed.', // the set's read was shown before its first sitting
   sets: 'obo.sets',
   notes: 'obo.notes',
+  qids: 'obo.qids.',     // the ids of a set's questions, kept when its questions are not
+  reports: 'obo.reports.', // questions the learner said are wrong or of no use
 };
 
 const SESSION_LEN = 12;
@@ -191,6 +193,38 @@ function writeLS(key, value) {
   } catch (e) {
     return false;
   }
+}
+
+/** Keep a set's questions on the device for opening offline. Only the open
+ *  set's are kept: twelve sets of questions run past the few megabytes the
+ *  browser gives an origin, and once that is full the answers would not be
+ *  saved either. Another set's questions come again from the repository. */
+function saveBank(domain, bank) {
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i -= 1) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(LS.bank) && k !== LS.bank + domain) localStorage.removeItem(k);
+    }
+  } catch (e) { /* storage blocked: nothing to clear */ }
+  // the ids alone are small, and let the set list count another set's reviews
+  writeLS(LS.qids + domain, (bank.questions || []).map((q) => q.id));
+  return writeLS(LS.bank + domain, bank);
+}
+
+/** How many reviews are waiting in a set now, from the answers this device
+ *  keeps and the set's question ids; null when the set was not begun here. */
+function dueIn(setId) {
+  const now = Date.now();
+  const waiting = (ids, get) => ids.filter((id) => {
+    const at = readyAt(get(id));
+    return at !== null && at <= now;
+  }).length;
+  if (setId === S.cfg.domain && S.bank) return waiting(S.bank.questions.map((q) => q.id), (id) => S.qstate.get(id));
+  const events = readLS(LS.events + setId, null);
+  const ids = readLS(LS.qids + setId, null);
+  if (!events || !events.length || !ids) return null;
+  const table = Schedule.replay(events, Schedule.DEFAULT_INTERVALS, 0, Schedule.DEFAULT_FRACTIONS);
+  return waiting(ids, (id) => table[id]);
 }
 
 function deviceId() {
@@ -409,7 +443,9 @@ function buildQueue(opts) {
 
   const due = [];
   const fresh = [];
+  const told = reportedIds();
   for (const q of qs) {
+    if (told.has(q.id)) continue;
     if (only === 'weak' && !wrongItems.has(q.item)) continue;
     if (!unlocked(q)) continue;
     const st = S.qstate.get(q.id);
@@ -608,6 +644,7 @@ async function pushEvents() {
   } finally {
     S.syncing = false;
     paintSyncNote();
+    pushReports();
     if (S.dirty || S.pushAgain) {
       S.pushAgain = false;
       setTimeout(pushEvents, S.lastSyncError ? 15000 : 250);
@@ -662,6 +699,7 @@ function record(q, chosen, correct, dunno, ms) {
 function show(name, opts) {
   const swap = () => {
     closeTerm();
+    closeReport();
     for (const el of document.querySelectorAll('.screen')) el.classList.toggle('on', el.id === 'screen-' + name);
     document.documentElement.dataset.screen = name;
     // the long reads sit on a lighter paper
@@ -815,9 +853,18 @@ function phrase(el, text, opts) {
     for (const m of marks) {
       if (m.start < off + i || m.end > off + s.length) continue;
       plain(s.slice(i, m.start - off));
-      el.appendChild(h('button', { type: 'button', class: 'term', 'data-term': m.term.term,
-        'aria-haspopup': 'dialog', text: text.slice(m.start, m.end) }));
+      const btn = h('button', { type: 'button', class: 'term', 'data-term': m.term.term,
+        'aria-haspopup': 'dialog', text: text.slice(m.start, m.end) });
       i = m.end - off;
+      // a button is one block to line breaking, so a full stop or a closing
+      // bracket after it could start the next line; they are kept together
+      const tail = s.slice(i).match(/^[。、」』）)！？!?]+/);
+      if (tail) {
+        el.appendChild(h('span', { class: 'term-keep' }, btn, document.createTextNode(tail[0])));
+        i += tail[0].length;
+      } else {
+        el.appendChild(btn);
+      }
     }
     plain(s.slice(i));
   };
@@ -1287,6 +1334,8 @@ function paintHome() {
   }
   // past the day's cap the way on is there, but quiet
   $('btn-more').hidden = !!q.list.length || unseen === 0;
+  // a short sitting for a day with little time: three, reviews first
+  $('btn-short').hidden = q.list.length <= 3;
   paintSyncNote();
 }
 
@@ -1307,6 +1356,10 @@ function startSession(opts) {
   }
   S.primerThenStart = false;
   const q = buildQueue(opts);
+  if (opts && opts.short) {
+    const seen = q.list.filter((x) => S.qstate.has(x.id));
+    q.list = seen.concat(q.list.filter((x) => !S.qstate.has(x.id))).slice(0, 3);
+  }
   const firstN = q.list.length;
   if (!q.list.length) {
     $('home-msg').textContent = '今は出す問題がありません。';
@@ -1359,6 +1412,7 @@ function fitPrompt() {
 
 function paintQuestion() {
   closeTerm();
+  closeReport();
   const s = S.session;
   const { q, again } = s.queue[s.idx];
   s.answered = false;
@@ -1723,15 +1777,92 @@ function paintSources(q) {
     try { host = new URL(u).hostname.replace(/^www\./, ''); } catch (e) { /* keep */ }
     if (!seen.has(host)) seen.set(host, u);
   }
-  if (!seen.size) {
-    src.hidden = true;
-    return;
+  if (seen.size) {
+    src.appendChild(h('span', { class: 'src-label', text: '出典' }));
+    for (const [host, u] of [...seen].slice(0, 3)) {
+      src.appendChild(h('a', { href: u, target: '_blank', rel: 'noopener', text: host }));
+    }
   }
-  src.appendChild(h('span', { class: 'src-label', text: '出典' }));
-  for (const [host, u] of [...seen].slice(0, 3)) {
-    src.appendChild(h('a', { href: u, target: '_blank', rel: 'noopener', text: host }));
-  }
+  // after the answer only: a question that is wrong, overstated or of no use
+  // in daily life can be told about where it is met
+  const told = reportedIds().has(q.id);
+  src.appendChild(h('button', { type: 'button', class: 'report-link', id: 'btn-report', disabled: told,
+    text: told ? '知らせました' : 'この問いを知らせる', onclick: () => openReport(q) }));
   src.hidden = false;
+}
+
+const REPORT_REASONS = ['答えが違う・古い', '言い過ぎ', '暮らしで使わない', '選択肢がまぎらわしい', 'そのほか'];
+
+/** The questions told about on this device, held back until the set's
+ *  questions are built again (by then the report has been read). */
+function reportedIds() {
+  const built = S.bank && S.bank.built_at;
+  return new Set((readLS(LS.reports + S.cfg.domain, []) || []).filter((r) => r.built === built).map((r) => r.qid));
+}
+
+function openReport(q) {
+  const sheet = $('report-sheet');
+  const host = $('report-reasons');
+  host.innerHTML = '';
+  for (const reason of REPORT_REASONS) {
+    host.appendChild(h('button', { type: 'button', class: 'btn btn-line report-reason', text: reason,
+      onclick: () => sendReport(q, reason) }));
+  }
+  sheet.hidden = false;
+}
+
+function closeReport() {
+  $('report-sheet').hidden = true;
+}
+
+function sendReport(q, reason) {
+  const domain = S.cfg.domain;
+  const list = readLS(LS.reports + domain, []) || [];
+  list.push({ id: uid(), ts: nowIso(), device: deviceId(), qid: q.id, item: q.item, reason,
+    built: S.bank && S.bank.built_at });
+  writeLS(LS.reports + domain, list);
+  closeReport();
+  const btn = $('btn-report');
+  if (btn) {
+    btn.textContent = '知らせました。直るまで出しません';
+    btn.disabled = true;
+  }
+  pushReports();
+}
+
+/** Reports go to their own file, domains/<set>/reports/device-<id>.json,
+ *  added to and never rewritten: an answer file is counted as answers by the
+ *  page and the engine, and a report is not one. */
+async function pushReports() {
+  if (S.mode === 'local') return;
+  const domain = S.cfg.domain;
+  const mine = readLS(LS.reports + domain, []) || [];
+  if (!mine.some((r) => !r.sent)) return;
+  const path = `domains/${domain}/reports/device-${deviceId()}.json`;
+  try {
+    let sha = null;
+    let theirs = [];
+    const cur = await api(path);
+    if (cur.ok) {
+      const meta = await cur.json();
+      sha = meta.sha;
+      try { theirs = JSON.parse(b64decode(meta.content)).reports || []; } catch (e) { /* start over */ }
+    } else if (cur.status !== 404) {
+      return;
+    }
+    const have = new Set(theirs.map((r) => r.id));
+    const all = theirs.concat(mine.filter((r) => !have.has(r.id)).map(({ sent, ...r }) => r));
+    const payload = {
+      message: `reports from ${deviceId()}`,
+      content: b64encode(JSON.stringify({ device: deviceId(), domain, updated: nowIso(), reports: all }, null, 1) + '\n'),
+    };
+    if (sha) payload.sha = sha;
+    const res = await api(path, { method: 'PUT', body: JSON.stringify(payload) });
+    if (res.ok) {
+      for (const r of mine) r.sent = true;
+      writeLS(LS.reports + domain, mine);
+    }
+  } catch (e) { /* sent with the next answers */ }
 }
 
 function next() {
@@ -2074,6 +2205,17 @@ async function paintSets() {
     }
   }
   msg.textContent = '';
+  // Above the shelf, the sets with reviews waiting today, most first, so a
+  // review left in another set is seen without opening each one
+  const today = $('sets-today');
+  today.innerHTML = '';
+  const rows = sets.map((s) => ({ set: s, n: dueIn(s.id) })).filter((r) => r.n > 0).sort((a, b) => b.n - a.n);
+  today.append(h('h2', { class: 'section-title', text: '今日の復習' }),
+    rows.length
+      ? h('ul', { class: 'today-list' }, rows.map((r) => h('li', {}, h('button', { type: 'button', class: 'today-row',
+        onclick: () => switchSet(r.set.id) }, h('span', { class: 'today-name', text: r.set.title }),
+        h('span', { class: 'today-n', text: `${r.n}問` })))))
+      : h('p', { class: 'fine', text: 'いま復習が来ているセットはありません。' }));
   // The sets stand on a shelf as spines, each printed in its own two colours
   // with its title upright. The one being learned is taken out a little, as
   // the card being asked is lifted out of its box.
@@ -2177,6 +2319,24 @@ function paintSetup() {
   const pick = !cfg.domain;
   $('setup-next').hidden = !pick;
   $('btn-save-setup').textContent = pick ? '保存して学習セットを選ぶ' : '保存して読み込む';
+  // a page added to the home screen keeps its own storage, apart from the
+  // browser's (Apple, WWDC23), so the values typed in a tab are not there
+  const where = $('setup-where');
+  where.hidden = !!cfg.token;
+  if (!cfg.token) {
+    phrase(where, standalone()
+      ? 'ホーム画面のアプリは、ブラウザとは別に設定を保存します。ブラウザで入れた値はここにないので、もう一度入れてください。'
+      : 'ホーム画面に追加して使うなら、先に追加してアイコンから開いて入れてください。ブラウザで入れた値はホーム画面のアプリに引き継がれません。');
+  }
+}
+
+/** Opened from a home-screen icon rather than a browser tab. */
+function standalone() {
+  try {
+    return navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+  } catch (e) {
+    return false;
+  }
 }
 
 async function loadAndShow() {
@@ -2191,7 +2351,7 @@ async function loadAndShow() {
   try {
     const bank = await fetchBank();
     S.bank = bank;
-    writeLS(LS.bank + S.cfg.domain, bank);
+    saveBank(S.cfg.domain, bank);
     S.events = readLS(LS.events + S.cfg.domain, []) || [];
     S.dirty = !!readLS(LS.dirty + S.cfg.domain, false);
     // with nothing waiting, every answer here has been sent
@@ -2227,7 +2387,7 @@ async function boot() {
         S.mode = 'local';
         S.cfg = { repo: '', token: '', domain: bank.domain || 'local' };
         S.bank = bank;
-        writeLS(LS.bank + S.cfg.domain, bank);
+        saveBank(S.cfg.domain, bank);
         S.events = readLS(LS.events + S.cfg.domain, []) || [];
         rebuildState();
         paintHome();
@@ -2300,8 +2460,10 @@ function wire() {
     if (!e.target.closest('#term-sheet')) closeTerm();
   });
   $('term-close').addEventListener('click', closeTerm);
+  $('report-close').addEventListener('click', closeReport);
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeTerm(); });
   $('btn-more').addEventListener('click', () => startSession({ extra: true }));
+  $('btn-short').addEventListener('click', () => startSession({ short: true }));
   $('btn-next').addEventListener('click', next);
   $('btn-dunno').addEventListener('click', () => { if (!tooSoon()) answer(null, null); });
   $('btn-send').addEventListener('click', async () => {

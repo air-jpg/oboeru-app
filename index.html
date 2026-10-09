@@ -14,7 +14,7 @@
 <link rel="icon" href="icon-192.png">
 <link rel="preload" href="line-seed-jp-400.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="line-seed-jp-700.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="app.css?v=5b269439">
+<link rel="stylesheet" href="app.css?v=4f2bb36d">
 </head>
 <body>
 
@@ -59,6 +59,7 @@
           <p class="field-note"><span data-phrase>このリポジトリだけを対象にした細粒度トークンを使います。権限は Contents の Read and write です。</span> <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">GitHub で作る</a></p>
         </li>
       </ol>
+      <p class="fine" id="setup-where" hidden></p>
       <p class="fine" id="setup-next" data-phrase>保存したあとで最初の学習セットを選びます。</p>
       <p class="fine" data-phrase>登録した値はこの端末のブラウザの中にだけ残ります。</p>
       <p class="status" id="setup-msg" role="status"></p>
@@ -105,6 +106,7 @@
         <span class="btn-sub" id="start-sub"></span>
       </button>
       <button class="link link-more" id="btn-more" type="button" hidden>新しい問題をもう12問</button>
+      <button class="link link-more" id="btn-short" type="button" hidden>3問だけ解く</button>
     </footer>
   </section>
 
@@ -235,11 +237,19 @@
       <span class="icon-spacer"></span>
     </header>
     <div class="page">
+      <section class="today" id="sets-today" aria-label="今日の復習"></section>
       <ul class="sets" id="sets-list"></ul>
       <dl class="set-goals" id="sets-goals" aria-hidden="true"></dl>
       <p class="status" id="sets-msg" role="status"></p>
     </div>
   </section>
+
+  <!-- 問いを知らせる: 答えたあとに理由を1つ選ぶ -->
+  <div class="term-sheet report-sheet" id="report-sheet" role="dialog" aria-labelledby="report-title" hidden>
+    <p class="term-word" id="report-title">この問いのどこが気になりましたか</p>
+    <div class="report-reasons" id="report-reasons"></div>
+    <button class="term-close" id="report-close" type="button">閉じる</button>
+  </div>
 
   <!-- 言葉の意味: 本文の印のある言葉を押すと下の帯の上に出る -->
   <div class="term-sheet" id="term-sheet" role="dialog" aria-labelledby="term-word" hidden>
@@ -250,9 +260,9 @@
 </main>
 
 <noscript><p style="padding:24px">このページは JavaScript が必要です。</p></noscript>
-<script src="schedule.js?v=5b269439"></script>
-<script src="budoux-ja.js?v=5b269439"></script>
-<script src="japan-map.js?v=5b269439"></script>
-<script src="app.js?v=5b269439"></script>
+<script src="schedule.js?v=4f2bb36d"></script>
+<script src="budoux-ja.js?v=4f2bb36d"></script>
+<script src="japan-map.js?v=4f2bb36d"></script>
+<script src="app.js?v=4f2bb36d"></script>
 </body>
 </html>
