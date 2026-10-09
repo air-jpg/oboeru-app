@@ -312,6 +312,11 @@ function applyEvent(st, ev) {
 function rebuildState() {
   const table = Schedule.replay(S.events.concat(S.remote), intervals(), deadlineMs(), fractions());
   S.qstate = new Map(Object.entries(table));
+  // a question that asks is answered once and never comes back to review
+  for (const q of (S.bank && S.bank.questions) || []) {
+    const st = q.ask && S.qstate.get(q.id);
+    if (st) st.due = null;
+  }
   return S.qstate;
 }
 
@@ -355,8 +360,10 @@ function reviewPace() {
     last.set(e.qid, t);
   }
   const acc = n ? right / n : null;
-  let cap = NEW_PER_DAY;
-  if (n >= PACE_MIN_REVIEWS && !(deadlineMs() > Date.now())) {
+  // a set that diagnoses names its own day's number
+  const own = S.bank && S.bank.new_per_day;
+  let cap = own || NEW_PER_DAY;
+  if (!own && n >= PACE_MIN_REVIEWS && !(deadlineMs() > Date.now())) {
     cap = PACE_STEPS.find(([floor]) => acc >= floor)[1];
   }
   return { n, acc, cap };
@@ -446,6 +453,7 @@ function buildQueue(opts) {
   const told = reportedIds();
   for (const q of qs) {
     if (told.has(q.id)) continue;
+    if (q.ask && S.qstate.has(q.id)) continue;   // asked once
     if (only === 'weak' && !wrongItems.has(q.item)) continue;
     if (!unlocked(q)) continue;
     const st = S.qstate.get(q.id);
@@ -464,7 +472,7 @@ function buildQueue(opts) {
   const reviewedToday = new Set(S.events.concat(S.remote)
     .filter((e) => parseTs(e.ts) >= start && !e.first_seen).map((e) => e.qid)).size;
   const dayRoom = Math.max(0, BACKLOG - due.length - reviewedToday);
-  const room = extra ? SESSION_LEN : backlog ? 0 : Math.min(newRoom(), dayRoom);
+  const room = extra ? SESSION_LEN : backlog ? 0 : S.bank.new_per_day ? newRoom() : Math.min(newRoom(), dayRoom);
   fresh.splice(0, fresh.length, ...pickFresh(fresh, room));
 
   // Interleave review and new so the session is not two blocks.
@@ -1452,7 +1460,8 @@ function paintQuestion() {
   box.innerHTML = '';
   // a new order at each meeting, so a card is not answered by where its
   // answer sat last time; the same order if the page is reopened mid-question
-  const opts = shuffle(q.options, `${q.id}:${st ? st.seen : 0}${again ? ':again' : ''}`);
+  // the choices of a question that asks are steps in order, kept in order
+  const opts = q.ask ? q.options.slice() : shuffle(q.options, `${q.id}:${st ? st.seen : 0}${again ? ':again' : ''}`);
   opts.forEach((opt, i) => {
     const btn = h('button', { type: 'button', class: 'choice', 'data-key': String(i + 1) },
       h('span', { class: 'choice-key', text: String(i + 1), 'aria-hidden': 'true' }),
@@ -1513,16 +1522,20 @@ function answer(opt, btn) {
   const q = slot.q;
   if (s.answered) return;
   s.answered = true;
-  const correct = !!(opt && opt.correct);
+  // a question that asks has no right answer: any choice is recorded as
+  // given, and "わからない" is an answer too
+  const ask = !!q.ask;
+  const correct = ask ? !!opt : !!(opt && opt.correct);
   const ms = Date.now() - s.shownAt;
   const before = S.qstate.get(q.id);
   const fromBox = before ? before.box : 0;
   const st = record(q, opt ? opt.text : null, correct, !opt, ms);
+  if (ask) st.due = null;
   s.answers[s.idx] = { q, correct, dunno: !opt, due: st.due, box: st.box, chosen: opt, why: opt && !correct ? backOf(q, opt) : '', firstSight: !before };
 
   // A miss comes back before the sitting ends, once, a few questions on.
   let reasked = false;
-  if (!correct && !slot.again && s.reasked < REASK_MAX) {
+  if (!ask && !correct && !slot.again && s.reasked < REASK_MAX) {
     const at = Math.min(s.queue.length, s.idx + 1 + REASK_GAP);
     s.queue.splice(at, 0, { q, again: true });
     s.reasked += 1;
@@ -1554,7 +1567,9 @@ function answer(opt, btn) {
     el.classList.toggle('has-back', !!back && el !== btn);
     el.classList.remove('open');
     el.style.setProperty('--i', i);
-    if (o.correct) {
+    if (ask) {
+      el.dataset.state = el === btn ? 'correct' : 'other';
+    } else if (o.correct) {
       el.dataset.state = 'correct';
       el.appendChild(svgUse(`maru-${variant}`, 'mark mark-maru'));
     } else if (el === btn) {
@@ -1567,7 +1582,7 @@ function answer(opt, btn) {
     if (back && el !== btn) el.setAttribute('aria-expanded', 'false');
     else el.removeAttribute('aria-expanded');
     // what a screen reader says for each choice once it is marked
-    const said = o.correct ? '正解' : el === btn ? '選んだ答え' : '';
+    const said = ask ? (el === btn ? '選んだ答え' : '') : o.correct ? '正解' : el === btn ? '選んだ答え' : '';
     el.setAttribute('aria-label', [said, o.text, back].filter(Boolean).join('。'));
   });
   $('btn-dunno').hidden = true;
@@ -1577,16 +1592,16 @@ function answer(opt, btn) {
   // A question met for the first time works as a pretest: guessing wrong or
   // not knowing, then reading the answer, is how it is learnt, so a first
   // meeting that misses carries no cross (it is still recorded as a miss).
-  const firstMiss = !correct && !before;
+  const firstMiss = ask || (!correct && !before);
   $('q-judge').dataset.tone = correct ? 'ok' : firstMiss ? 'new' : 'ng';
-  $('v-head').textContent = correct ? '正解' : firstMiss ? '初めて' : opt ? '不正解' : '答えは丸の選択肢';
+  $('v-head').textContent = ask ? '記録' : correct ? '正解' : firstMiss ? '初めて' : opt ? '不正解' : '答えは丸の選択肢';
   const vm = $('v-mark');
   vm.innerHTML = '';
   if (!firstMiss) vm.appendChild(svgUse(correct ? `maru-${variant}` : `batsu-${variant}`, correct ? 'judge-pen' : 'judge-pen batsu'));
-  $('v-said').textContent = correct ? '' : `正解は${q.answer}。`;
+  $('v-said').textContent = correct || ask ? '' : `正解は${q.answer}。`;
   // one line under the mark: where the card went, or when it comes back
   // a long name would break the line; then the card is just this card
-  const say = (name) => (reasked ? 'この回でもう一度出る'
+  const say = (name) => (ask ? 'この問いは一度だけ' : reasked ? 'この回でもう一度出る'
     : !correct ? `${name}は${whenAgain(readyAt(st))}もう一度`
       : `${name}は${boxLabel(st.box)}の箱へ`);
   const named = say(q.item_name || 'この札');
@@ -1618,7 +1633,9 @@ function answer(opt, btn) {
   paintSources(q);
   v.hidden = false;
   $('q-judge').hidden = false;
-  paintTrail($('q-trail'), q, fromBox, st.box);
+  // a question that asks goes to no box, so the boxes are not drawn for it
+  $('q-trail').hidden = ask;
+  if (!ask) paintTrail($('q-trail'), q, fromBox, st.box);
   if (!spill) {
     // The verdict line and the explanation sit down by the choices, where the
     // shelf stood, so the eye has little to cross; the room left over is the
@@ -1777,7 +1794,7 @@ function paintSources(q) {
     try { host = new URL(u).hostname.replace(/^www\./, ''); } catch (e) { /* keep */ }
     if (!seen.has(host)) seen.set(host, u);
   }
-  if (seen.size) {
+  if (seen.size && !q.ask) {
     src.appendChild(h('span', { class: 'src-label', text: '出典' }));
     for (const [host, u] of [...seen].slice(0, 3)) {
       src.appendChild(h('a', { href: u, target: '_blank', rel: 'noopener', text: host }));
