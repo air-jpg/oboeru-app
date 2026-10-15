@@ -1281,3 +1281,14 @@ body {
 .report-link:disabled { text-decoration: none; cursor: default; }
 .report-reasons { display: grid; gap: 8px; margin: 12px 0 0; }
 .report-reason { width: 100%; min-height: 44px; font-size: 15px; }
+
+/* abbreviations named under the question and under the explanation */
+.abbr-list { margin: 10px 0 0; display: grid; gap: 4px; }
+.abbr-list[hidden] { display: none; }
+.abbr-row { display: grid; grid-template-columns: max-content 1fr; gap: 0 10px; font-size: 13px; line-height: 1.5; color: var(--ink-2); }
+.abbr-row dt { font-weight: 700; color: var(--ink); }
+.abbr-row dd { margin: 0; }
+.abbr-full { font-family: var(--gothic); font-weight: 700; }
+
+/* the sitting over all sets, at the top of the set list */
+.tour-btn { width: 100%; margin: 8px 0 0; }

@@ -14,7 +14,7 @@
 <link rel="icon" href="icon-192.png">
 <link rel="preload" href="line-seed-jp-400.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="line-seed-jp-700.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="app.css?v=40d11734">
+<link rel="stylesheet" href="app.css?v=ae936116">
 </head>
 <body>
 
@@ -107,6 +107,8 @@
       </button>
       <button class="link link-more" id="btn-more" type="button" hidden>新しい問題をもう12問</button>
       <button class="link link-more" id="btn-short" type="button" hidden>3問だけ解く</button>
+      <button class="link link-more" id="btn-relearn" type="button" hidden>まちがえた問題をもう一度</button>
+      <button class="link link-more" id="btn-tour" type="button">全部のセットから12問</button>
     </footer>
   </section>
 
@@ -125,6 +127,7 @@
         <div class="q-head" id="q-head">
           <p class="kicker" id="q-kicker"></p>
           <h1 class="prompt" id="q-prompt"></h1>
+          <dl class="abbr-list" id="q-abbr" hidden></dl>
           <div class="chord-fig" id="q-chord" hidden></div>
           <div class="map-fig" id="q-map" hidden></div>
           <div class="label-fig" id="q-label" hidden></div>
@@ -147,6 +150,7 @@
           <div class="chord-fig" id="v-map" hidden></div>
           <p class="verdict-chosen" id="v-chosen" hidden></p>
           <p class="verdict-text" id="v-text"></p>
+          <dl class="abbr-list" id="v-abbr" hidden></dl>
           <p class="verdict-aside" id="v-aside" hidden></p>
           <p class="verdict-src" id="v-src" hidden></p>
         </section>
@@ -237,6 +241,7 @@
       <span class="icon-spacer"></span>
     </header>
     <div class="page">
+      <button class="btn btn-ink tour-btn" id="btn-tour-sets" type="button">全部のセットから12問</button>
       <section class="today" id="sets-today" aria-label="今日の復習"></section>
       <ul class="sets" id="sets-list"></ul>
       <dl class="set-goals" id="sets-goals" aria-hidden="true"></dl>
@@ -260,9 +265,9 @@
 </main>
 
 <noscript><p style="padding:24px">このページは JavaScript が必要です。</p></noscript>
-<script src="schedule.js?v=40d11734"></script>
-<script src="budoux-ja.js?v=40d11734"></script>
-<script src="japan-map.js?v=40d11734"></script>
-<script src="app.js?v=40d11734"></script>
+<script src="schedule.js?v=ae936116"></script>
+<script src="budoux-ja.js?v=ae936116"></script>
+<script src="japan-map.js?v=ae936116"></script>
+<script src="app.js?v=ae936116"></script>
 </body>
 </html>

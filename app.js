@@ -30,6 +30,7 @@ const LS = {
   notes: 'obo.notes',
   qids: 'obo.qids.',     // the ids of a set's questions, kept when its questions are not
   reports: 'obo.reports.', // questions the learner said are wrong or of no use
+  tourAt: 'obo.tourAt',  // where the last sitting over all sets left off
 };
 
 const SESSION_LEN = 12;
@@ -57,18 +58,24 @@ const LOAD_CAP = 5;
 // The page offers a card no sooner than ten minutes after its last answer;
 // the rule itself, and engine/ingest.py, are unchanged.
 const REST_MIN = 10;
+const RELEARN_MIN = 15;
 function readyAt(st) {
   if (!st || st.due === null) return null;
-  // Left wrong when the sitting ended (missed again on the second ask, or
-  // missed when the second asks were used up): back tomorrow, so a finished
-  // day stays finished. With a deadline close, ten minutes is enough.
+  // Left wrong: not in the same sitting, but at the end of a later one that
+  // starts a quarter of an hour on, or tomorrow. Recall spaced by a gap holds
+  // better than recall a minute after the answer was read (Dunlosky et al.
+  // 2013 and Cepeda et al. 2006, research/life-learning-science.txt L-23 and
+  // L-78). With a deadline close, ten minutes is enough.
   if (st.lastCorrect === false && !(deadlineMs() > Date.now())) {
-    return Math.max(st.due, Schedule.dayStart(st.lastTs || 0, 1));
+    return Math.max(st.due, (st.lastTs || 0) + RELEARN_MIN * 60000);
   }
   return Math.max(st.due, (st.lastTs || 0) + REST_MIN * 60000);
 }
-// A question missed in a sitting comes back before the sitting ends, a few
-// questions later so that the answer has to be recalled rather than repeated.
+// A question missed in a sitting used to come back a few questions later.
+// Asked again a minute after its answer was read, it was answered from the
+// screen just seen, not from memory, and the learner found the same question
+// coming round again and again (2026-10-15). A miss now waits for tomorrow,
+// which the review rule already gives it; REASK_MAX is 0.
 const REASK_GAP = 3;
 // A question takes taps only after it has been on screen this long, so a
 // second tap on "次の問題" cannot land on the next question's choices or
@@ -77,7 +84,7 @@ const TAP_GUARD_MS = 450;
 function tooSoon() {
   return !!(S.session && Date.now() - S.session.shownAt < TAP_GUARD_MS);
 }
-const REASK_MAX = 4;
+const REASK_MAX = 0;
 
 const S = {
   cfg: null,
@@ -450,6 +457,8 @@ function buildQueue(opts) {
 
   const due = [];
   const fresh = [];
+  const relearn = [];   // missed earlier today: at the end of a later sitting
+  const todayStart = Schedule.dayStart(now, 0);
   const told = reportedIds();
   for (const q of qs) {
     if (told.has(q.id)) continue;
@@ -458,7 +467,10 @@ function buildQueue(opts) {
     if (!unlocked(q)) continue;
     const st = S.qstate.get(q.id);
     if (!st) fresh.push(q);
-    else if (st.due !== null && readyAt(st) <= now) due.push(q);
+    else if (st.due !== null && readyAt(st) <= now) {
+      if (st.lastCorrect === false && (st.lastTs || 0) >= todayStart) relearn.push(q);
+      else due.push(q);
+    }
   }
   // More reviews waiting than two sittings (after days away): new questions
   // rest until they are down, and the cards on the shortest gaps come first,
@@ -489,7 +501,10 @@ function buildQueue(opts) {
     else if (i < due.length) out.push(due[i++]);
     else break;
   }
-  return { list: spaceOutItems(out), due: i, fresh: j, backlog };
+  if (opts && opts.relearn) return { list: relearn.slice(0, SESSION_LEN), due: 0, fresh: 0, backlog, relearn: relearn.length, only: true };
+  // the ones missed earlier today close the sitting, so the others come between
+  const tail = relearn.slice(0, Math.max(0, SESSION_LEN + 4 - out.length));
+  return { list: spaceOutItems(out).concat(tail), due: i, fresh: j, backlog, relearn: relearn.length, tail: tail.length };
 }
 
 /** A question naming the answer and asking which item it belongs to only makes
@@ -998,6 +1013,21 @@ function paintLabel(host, d, show) {
   host.appendChild(card);
 }
 
+/** What each abbreviation stands for and means, one line each, so an
+ *  unfamiliar string of capitals does not stop the reading (asked for on
+ *  2026-10-15). The words come from domains/abbr.json through the bank. */
+function paintAbbr(host, keys) {
+  host.textContent = '';
+  const all = (S.bank && S.bank.abbr) || {};
+  const list = (keys || []).filter((k) => all[k]);
+  host.hidden = !list.length;
+  for (const k of list) {
+    const a = all[k];
+    host.appendChild(h('div', { class: 'abbr-row' }, h('dt', { text: k }),
+      h('dd', {}, h('span', { class: 'abbr-full', text: a.full }), document.createTextNode(` ${a.mean}`))));
+  }
+}
+
 function paintChord(host, d, show) {
   host.textContent = '';
   host.hidden = !(d && show);
@@ -1013,8 +1043,15 @@ const termOrder = new WeakMap();
  *  shorter one inside it. */
 function setTerms() {
   const b = S.bank;
-  if (!b || !b.terms || !b.terms.length) return [];
-  if (!termOrder.has(b)) termOrder.set(b, b.terms.slice().sort((x, y) => y.term.length - x.term.length));
+  if (!b) return [];
+  if (!termOrder.has(b)) {
+    // the set's words, and each abbreviation with its full name and meaning,
+    // so one in an explanation can be tapped like a word
+    const have = new Set((b.terms || []).map((x) => x.term));
+    const abbr = Object.entries(b.abbr || {}).filter(([k]) => !have.has(k))
+      .map(([k, a]) => ({ term: k, def: `${a.full}。${a.mean}`, source: '' }));
+    termOrder.set(b, (b.terms || []).concat(abbr).sort((x, y) => y.term.length - x.term.length));
+  }
   return termOrder.get(b);
 }
 
@@ -1033,8 +1070,12 @@ function findTerms(text, terms, seen) {
     if (seen && seen.has(t.term)) continue;
     // "skip" lists longer words that start with the term but mean something
     // else (冷やして is not 冷や, the sake at room temperature)
+    // a word in Latin letters is found only as a whole word: OS is not the
+    // end of iOS, nor AI the middle of MAIL
+    const latin = /^[A-Za-z0-9.&/+-]+$/.test(t.term);
+    const inWord = (i) => latin && (/[A-Za-z0-9]/.test(text[i - 1] || '') || /[A-Za-z0-9]/.test(text[i + t.term.length] || ''));
     const taken = (i) => out.some((m) => i < m.end && i + t.term.length > m.start)
-      || (t.skip || []).some((s) => text.startsWith(s, i));
+      || (t.skip || []).some((s) => text.startsWith(s, i)) || inWord(i);
     let i = text.indexOf(t.term);
     while (i !== -1 && taken(i)) i = text.indexOf(t.term, i + 1);
     if (i === -1) continue;
@@ -1327,9 +1368,14 @@ function paintHome() {
   note.hidden = !(q.backlog || slower || away >= 3);
   const start = $('btn-start');
   const unseen = S.bank.questions.filter((x) => !S.qstate.has(x.id)).length;
-  $('home-done').hidden = !!q.list.length;
-  start.hidden = !q.list.length;
-  if (!q.list.length) {
+  // the ones missed earlier today do not open a sitting on their own: the
+  // day stays finished, with a quiet way to meet them again
+  const main = q.list.length - (q.tail || 0);
+  $('home-done').hidden = !!main;
+  start.hidden = !main;
+  $('btn-relearn').hidden = !!main || !q.relearn;
+  $('btn-relearn').textContent = `まちがえた${q.relearn}問をもう一度`;
+  if (!main) {
     $('done-main').textContent = '今日の分は終わりました';
     $('done-sub').textContent = Number.isFinite(c.nextDue) ? nextReviewLine(c.nextDue) : '';
   } else {
@@ -1338,12 +1384,13 @@ function paintHome() {
     const parts = [];
     if (q.due) parts.push(`復習${q.due}問`);
     if (q.fresh) parts.push(`新しい問題${q.fresh}問`);
+    if (q.tail) parts.push(`まちがえた${q.tail}問`);
     $('start-sub').textContent = parts.join('と');
   }
   // past the day's cap the way on is there, but quiet
   $('btn-more').hidden = !!q.list.length || unseen === 0;
   // a short sitting for a day with little time: three, reviews first
-  $('btn-short').hidden = q.list.length <= 3;
+  $('btn-short').hidden = main <= 3;
   paintSyncNote();
 }
 
@@ -1364,11 +1411,12 @@ function startSession(opts) {
   }
   S.primerThenStart = false;
   const q = buildQueue(opts);
-  if (opts && opts.short) {
+  if (opts && (opts.short || opts.limit)) {
     const seen = q.list.filter((x) => S.qstate.has(x.id));
-    q.list = seen.concat(q.list.filter((x) => !S.qstate.has(x.id))).slice(0, 3);
+    q.list = seen.concat(q.list.filter((x) => !S.qstate.has(x.id))).slice(0, opts.limit || 3);
   }
   const firstN = q.list.length;
+  if (!q.list.length && opts && opts.tour) return false;
   if (!q.list.length) {
     $('home-msg').textContent = '今は出す問題がありません。';
     return;
@@ -1444,6 +1492,8 @@ function paintQuestion() {
   paintChord($('v-chord'), null, false);
   paintMap($('q-map'), q.map, q.map && q.map.at === 'prompt');
   paintLabel($('q-label'), q.label, !!q.label);
+  paintAbbr($('q-abbr'), q.abbr);
+  paintAbbr($('v-abbr'), null);
   paintMap($('v-map'), null, false);
   const area = $('q-area');
   area.classList.remove('answered', 'spill', 'low');
@@ -1546,6 +1596,10 @@ function answer(opt, btn) {
   // the finger; the question rises to the top of it and the explanation opens
   // below. A long question leaves too little room, and then the explanation
   // goes under the choices instead.
+  // the names under the question were read with it; after the answer they
+  // fold before the room is measured, and the explanation names only the
+  // ones new in it
+  $('q-abbr').hidden = true;
   const area = $('q-area');
   // where the shelf stood before the answer, so it can stay there a moment
   const stageTop0 = $('q-stage').offsetTop;
@@ -1622,6 +1676,7 @@ function answer(opt, btn) {
   // explanation, so the explanation still fits above the choices
   if (q.map && q.map.at === 'prompt') $('q-map').hidden = true;
   if (q.label) $('q-label').hidden = true;
+  paintAbbr($('v-abbr'), null);
   // one more line: the set's rule of thumb on its core question, or else a
   // dish to cook with what this question teaches
   const aside = $('v-aside');
@@ -1884,7 +1939,8 @@ async function pushReports() {
 
 function next() {
   const s = S.session;
-  if (!s.answered) return;
+  // a second tap after the last question must not end the sitting twice
+  if (!s || !s.answered || s.done) return;
   s.idx += 1;
   if (s.idx >= s.queue.length) return finish();
   const swap = () => {
@@ -1915,6 +1971,18 @@ function grownCount() {
 
 function finish() {
   const s = S.session;
+  s.done = true;
+  // within a sitting over all sets, the next set's part follows at once;
+  // the result comes once, after the last part
+  if (S.tour) {
+    S.tour.total += s.answers.filter(Boolean).length;
+    S.tour.sets += 1;
+    if (S.tour.i < S.tour.parts.length - 1) {
+      S.tour.i += 1;
+      runTourPart();
+      return;
+    }
+  }
   const first = s.answers.filter((a, i) => a && !s.queue[i].again);
   // Reviews are what the score counts; a question met for the first time is
   // a pretest, not a test, so it is counted as met, not as passed or failed.
@@ -1944,7 +2012,9 @@ function finish() {
   }
   const parts = [...backs].slice(0, 2).map(([w, n]) => `${w}に${n}問`);
   const grown = grownCount();
-  phrase($('r-note'), (parts.length
+  const tourLine = S.tour ? `全部のセットから${S.tour.total}問を解きました(${S.tour.sets}セット)。` : '';
+  S.tour = null;
+  phrase($('r-note'), tourLine + (parts.length
     ? `${mins}分で解きました。次は${parts.join('と')}が出ます。`
     : `${mins}分で解きました。`)
     + (grown ? `初めは答えられなかった問題のうち${grown}問が${boxLabel(READY_FROM)}以上の箱に入っています。` : ''));
@@ -2018,9 +2088,18 @@ function finish() {
   $('screen-result').classList.toggle('goes-on', more > 0);
   $('btn-home').textContent = more ? `続けて${Math.min(more, SESSION_LEN)}問を解く` : 'ホームに戻る';
   $('btn-again').hidden = !more;
+  // after a sitting over all sets, the way on is another one
+  S.resultTour = !!tourLine;
+  if (tourLine) {
+    $('btn-home').textContent = '全部のセットからもう12問';
+    $('btn-again').hidden = false;
+    S.resultGoesOn = true;
+    $('screen-result').classList.add('goes-on');
+  }
   // ending here weighs the same as going on: the choice is the learner's
   $('btn-again').textContent = 'ここで終える';
-  if (more) phrase($('r-note'), `${mins}分で解きました。今日はあと${left}問あります。`);
+  if (tourLine) phrase($('r-note'), `${tourLine}${mins}分でした。`);
+  else if (more) phrase($('r-note'), `${mins}分で解きました。今日はあと${left}問あります。`);
   $('r-kicker').textContent = `今回の${first.length}問`;
   $('r-side-title').textContent = S.bank.cover_title || S.bank.short_title || '';
   S.resultAt = Date.now();
@@ -2299,6 +2378,96 @@ function paintCalendar(host) {
   host.append(h('p', { class: 'cal-month', 'aria-hidden': 'true', text: `${m + 1}月` }), grid);
 }
 
+/* ---------- a sitting over all sets ---------- */
+
+// Twelve questions drawn from every set in use: the reviews waiting first,
+// three at most from a set, then new questions two to a set, the sets taken
+// in turn from where the last such sitting stopped. A day with little time
+// can stop after one; a day that goes well can run it again and again
+// (asked for on 2026-10-15). Each set's part runs as its own sitting, one
+// after another, so its answers stay in its own file.
+const TOUR_LEN = 12;
+
+function planTour(sets) {
+  const pool = sets.filter((s) => s.mix !== false);
+  const parts = new Map();
+  let left = TOUR_LEN;
+  const waiting = pool.map((s) => ({ id: s.id, n: dueIn(s.id) || 0 })).filter((x) => x.n > 0).sort((a, b) => b.n - a.n);
+  for (const w of waiting) {
+    if (left <= 0) break;
+    const k = Math.min(3, w.n, left);
+    parts.set(w.id, k);
+    left -= k;
+  }
+  const at = (readLS(LS.tourAt, 0) || 0) % Math.max(1, pool.length);
+  const order = pool.slice(at).concat(pool.slice(0, at));
+  let used = 0;
+  for (const s of order) {
+    if (left <= 0) break;
+    const k = Math.min(2, left);
+    parts.set(s.id, (parts.get(s.id) || 0) + k);
+    left -= k;
+    used += 1;
+  }
+  writeLS(LS.tourAt, at + used);
+  return [...parts].map(([id, n]) => ({ id, n }));
+}
+
+async function startTour() {
+  let sets = readLS(LS.sets, []) || [];
+  try {
+    sets = await fetchSetIndex();
+    writeLS(LS.sets, sets);
+  } catch (e) { /* the list kept from last time */ }
+  const parts = planTour(sets);
+  if (!parts.length) return;
+  S.tour = { parts, i: 0, carry: 0, total: 0, sets: 0 };
+  runTourPart();
+}
+
+/** Open the part's set and ask its questions. A set with fewer to give than
+ *  its share passes the rest on to the next one. */
+async function runTourPart() {
+  const tour = S.tour;
+  const part = tour.parts[tour.i];
+  if (part.id !== S.cfg.domain) {
+    // the last answer is usually still on its way: wait for it a little
+    for (let k = 0; k < 50 && S.syncing; k++) await new Promise((r) => setTimeout(r, 200));
+    if (S.dirty && !S.syncing) await pushEvents();
+    if (S.syncing || S.dirty) {
+      // an answer not yet sent stays with its set; the sitting ends here
+      S.tour = null;
+      paintHome();
+      show('home');
+      $('home-msg').textContent = '記録をまだ送れていないので、ほかのセットへ移れません。つながってからもう一度。';
+      return;
+    }
+    S.cfg.domain = part.id;
+    writeLS(LS.cfg, S.cfg);
+    S.bank = null;
+    S.events = [];
+    S.remote = [];
+    S.qstate = new Map();
+    S.session = null;
+    await loadAndShow({ quiet: true });
+    if (!S.bank) return;
+  }
+  const want = part.n + tour.carry;
+  const ok = startSession({ limit: want, tour: true, afterPrimer: true });
+  const got = ok === false ? 0 : S.session ? S.session.queue.length : 0;
+  tour.carry = Math.max(0, want - got);
+  if (ok === false) {
+    if (tour.i < tour.parts.length - 1) {
+      tour.i += 1;
+      runTourPart();
+    } else {
+      S.tour = null;
+      paintHome();
+      show('home');
+    }
+  }
+}
+
 /** Answers belong to the set they were given in. An unsent answer is sent
  *  before the switch; if it cannot be, the switch waits, so no answer is left
  *  behind or written into the wrong set's file. */
@@ -2356,14 +2525,19 @@ function standalone() {
   }
 }
 
-async function loadAndShow() {
+async function loadAndShow(opts) {
+  // within a sitting over all sets the next part's questions follow at once,
+  // so the home is not shown between them
+  const quiet = !!(opts && opts.quiet);
   const cached = readLS(LS.bank + S.cfg.domain, null);
   if (cached) {
     S.bank = cached;
     S.events = readLS(LS.events + S.cfg.domain, []) || [];
     rebuildState();
-    paintHome();
-    show('home');
+    if (!quiet) {
+      paintHome();
+      show('home');
+    }
   }
   try {
     const bank = await fetchBank();
@@ -2375,8 +2549,10 @@ async function loadAndShow() {
     if (!S.dirty) writeLS(LS.sent + S.cfg.domain, S.events.length);
     await pullRemoteEvents();
     rebuildState();
-    paintHome();
-    show('home');
+    if (!quiet) {
+      paintHome();
+      show('home');
+    }
     if (S.dirty) pushEvents();
   } catch (err) {
     if (!S.bank) {
@@ -2481,6 +2657,9 @@ function wire() {
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeTerm(); });
   $('btn-more').addEventListener('click', () => startSession({ extra: true }));
   $('btn-short').addEventListener('click', () => startSession({ short: true }));
+  $('btn-relearn').addEventListener('click', () => startSession({ relearn: true }));
+  $('btn-tour').addEventListener('click', () => startTour());
+  $('btn-tour-sets').addEventListener('click', () => startTour());
   $('btn-next').addEventListener('click', next);
   $('btn-dunno').addEventListener('click', () => { if (!tooSoon()) answer(null, null); });
   $('btn-send').addEventListener('click', async () => {
@@ -2495,7 +2674,8 @@ function wire() {
   $('btn-home').addEventListener('click', () => {
     // a second tap on the last "次の問題" must not start the next sitting
     if (Date.now() - (S.resultAt || 0) < TAP_GUARD_MS) return;
-    if (S.screen === 'result' && S.resultGoesOn && buildQueue().list.length) startSession();
+    if (S.screen === 'result' && S.resultTour) startTour();
+    else if (S.screen === 'result' && S.resultGoesOn && buildQueue().list.length) startSession();
     else goHome();
   });
   $('btn-primer').addEventListener('click', () => {
