@@ -59,6 +59,10 @@
   /* the lines are the ink itself; the hairlines between list rows are lighter */
   --rule: var(--ink);
   --rule-soft: color-mix(in srgb, var(--ink) 34%, var(--paper));
+  /* a mark that says where the sitting stands, or which day is today, has to
+     be told apart from the paper: WCAG 1.4.11 asks for 3:1, and the hairline
+     between list rows is too light for that */
+  --rule-mark: color-mix(in srgb, var(--ink) 62%, var(--paper));
   --press: color-mix(in srgb, var(--ink) 10%, var(--paper));
   /* running text; on a dark ground it steps back from the ink a little */
   --text: var(--ink);
@@ -134,7 +138,7 @@ body {
   position: relative;
   padding: calc(env(safe-area-inset-top) + 36px) var(--gutter) calc(var(--dock-h) + 28px);
 }
-.bar + .page { padding-top: 16px; }
+.bar:not([hidden]) + .page { padding-top: 16px; }
 
 /* ---------- type ---------- */
 
@@ -346,7 +350,11 @@ body {
   text-orientation: mixed;
   font-family: var(--display);
   font-weight: 800;
-  font-size: 40px;
+  /* a long title would take half the screen and push the menu under the bar.
+     Each character advances about 1.3 times its size, so the size is bounded
+     by the number of characters, which paintHome puts in --len. */
+  --len: 6;
+  font-size: min(40px, calc(24dvh / var(--len)));
   line-height: 1.22;
   letter-spacing: 0.08em;
 }
@@ -354,17 +362,16 @@ body {
 /* ---------- the shelf ---------- */
 
 .shelf { margin: 0; padding-top: 24px; }
-.page-home .shelf { padding-top: 8px; margin-bottom: 24px; }
+.page-home .shelf { padding-top: 8px; margin-bottom: 16px; }
 /* the shelf takes what the screen can spare, so the menu stays above the bar */
 /* the shelf takes all the height the cover and the menu leave */
 .page-home .shelf { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
 .page-home .shelf-boxes { flex: 1 1 auto; align-items: stretch; min-height: 0; }
 .page-home .box { grid-template-rows: minmax(0, 1fr) auto; }
-.page-home .tray { --front: 64px; height: auto; min-height: 120px; }
-@media (max-height: 780px) {
-  .page-home .cover-title { font-size: 28px; }
-
-}
+/* the floor the shelf can be squeezed to; it grows into whatever the cover
+   and the rows above it leave, so a lower floor costs nothing on a tall
+   screen and keeps the lines under the shelf in view on a short one */
+.page-home .tray { --front: 64px; height: auto; min-height: 88px; }
 @media (max-height: 700px) {
   .page-home { padding-top: calc(env(safe-area-inset-top) + 24px); }
   .page-home .row { min-height: 44px; }
@@ -378,7 +385,7 @@ body {
   .box-count.long { font-size: 16px; }
 }
 @media (max-height: 600px) {
-  .page-home .cover-title { font-size: 24px; max-height: 40vh; }
+  .page-home .cover-title { max-height: 40vh; }
   .page-home .cover-goal { font-size: 14px; }
   .page-home .tray { --front: 44px; min-height: 56px; }
   .page-home .home-plan { margin: 8px 0; }
@@ -391,7 +398,7 @@ body {
 /* today's plan, under the bracket, said only on a day of more than one sitting */
 .home-plan { margin: 16px 0 0; font-size: 16px; font-weight: 700; line-height: 1.6; }
 .home-plan-kicker { margin-right: 12px; color: var(--ink-2); }
-.home-plan-note { margin: -16px 0 24px; font-size: 14px; line-height: 1.6; color: var(--ink-2); }
+.home-plan-note { margin: -16px 0 8px; font-size: 14px; line-height: 1.6; color: var(--ink-2); }
 .page-home .cover { margin-bottom: 8px; }
 .page-home .home-plan { margin-bottom: 24px; }
 /* a finished day, said in the bar instead of a button that cannot be pressed */
@@ -532,7 +539,10 @@ body {
 /* the column beside the title: where things stand, and the other screens */
 .cover-status { margin: 24px 0 0; font-size: 16px; line-height: 1.75; }
 .cover-status:empty { display: none; }
-.link-more { display: flex; justify-self: center; min-height: 36px; margin-top: -4px; font-size: 14px; color: var(--ink-2); }
+.link-more { display: flex; align-items: center; justify-self: center; min-height: 44px; margin-top: -8px; font-size: 14px; color: var(--ink-2); }
+/* the sitting over all the sets is the one that gets opened again the next
+   day, so it reads in the ink of the page rather than the grey of a note */
+#btn-tour { font-weight: 700; color: var(--ink); }
 .menu { display: grid; grid-template-columns: 1fr 1fr; column-gap: 16px; margin-top: 24px; border-top: 2px solid var(--rule); }
 .row {
   display: flex;
@@ -568,7 +578,7 @@ body {
   flex: 1;
   height: 4px;
   border-radius: 4px;
-  background: var(--rule-soft);
+  background: var(--rule-mark);
   transition: background-color 240ms var(--ease-out);
 }
 .tick-ok { background: var(--ink); }
@@ -737,6 +747,21 @@ body {
 /* the shelf stands at the foot of the area, over the choices, where the
    explanation will open */
 .stage { margin: auto 0 0; padding: 40px 0 8px; }
+/* with a label or a figure over it the shelf draws small, so the choices
+   stay above the bar on a phone with the address bar showing */
+.q-area.with-fig .stage { padding: 8px 0 4px; }
+.q-area.with-fig .stage .tray { height: clamp(72px, 9vh, 88px); }
+.q-area.with-fig .stage .box-count { font-size: 17px; }
+.q-area.with-fig .stage .box-label { margin-top: 4px; }
+/* and when even that leaves the last choice under the bar, the shelf keeps
+   only the box the card sits in */
+.q-area.tight .stage { padding: 4px 0 0; }
+.q-area.tight .stage .tray { height: 48px; }
+.q-area.tight .stage { margin-top: 8px; }
+.q-area.tight .stage .box-count { font-size: 15px; }
+.q-area.tight .stage .box-label { display: none; }
+.q-area.tight .label-row { line-height: 1.3; }
+.q-area.tight .label-title { margin-bottom: 4px; }
 .stage .tray { height: clamp(104px, 15vh, 132px); }
 .stage .box-count { font-size: 20px; }
 .stage .box-label { margin-top: 8px; font-size: 12px; }
@@ -959,7 +984,7 @@ body {
 .cal-dow { padding-bottom: 4px; text-align: center; font-size: 12px; color: var(--ink-2); }
 .cal-day { display: grid; place-items: center; aspect-ratio: 1; max-width: 44px; justify-self: center; width: 100%; border-radius: 999px; font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .cal-day.on { background: var(--tint); color: var(--ink); font-weight: 700; box-shadow: inset 0 0 0 var(--line) var(--ink); }
-.cal-day.today:not(.on) { box-shadow: inset 0 0 0 1px var(--rule-soft); }
+.cal-day.today:not(.on) { box-shadow: inset 0 0 0 1px var(--rule-mark); }
 
 /* ---------- primer ---------- */
 
@@ -1254,12 +1279,12 @@ body {
 #v-map .chord-name { font-size: 15px; line-height: 1.2; }
 .entry-map .map-box { width: 160px; max-height: 160px; }
 /* a back label: drawn, not filled, like the boxes */
-.label-fig { margin: 12px 0 0; }
+.label-fig { margin: 10px 0 0; }
 .label-fig[hidden] { display: none; }
-.label-card { border: var(--line) solid var(--ink); border-radius: var(--corner); padding: 10px 14px; max-width: 320px; }
+.label-card { border: var(--line) solid var(--ink); border-radius: var(--corner); padding: 8px 14px; max-width: 320px; }
 .label-title { margin: 0 0 6px; font-size: 14px; font-weight: 700; color: var(--ink); }
 .label-rows { margin: 0; display: grid; gap: 2px; }
-.label-row { display: grid; grid-template-columns: 7em 1fr; gap: 8px; font-size: 14px; line-height: 1.5; }
+.label-row { display: grid; grid-template-columns: 7em 1fr; gap: 8px; font-size: 14px; line-height: 1.4; }
 .label-row dt { color: var(--ink-2); }
 .label-row dd { margin: 0; color: var(--ink); font-weight: 700; }
 #v-chord .chord-name { font-size: 15px; line-height: 1.2; }
@@ -1288,6 +1313,10 @@ body {
 .abbr-row { display: grid; grid-template-columns: max-content 1fr; gap: 0 10px; font-size: 13px; line-height: 1.5; color: var(--ink-2); }
 .abbr-row dt { font-weight: 700; color: var(--ink); }
 .abbr-row dd { margin: 0; }
+/* the list under the question is read before the choices, so it is set
+   tighter than the one in the explanation */
+#q-abbr { margin-top: 8px; gap: 2px; }
+#q-abbr .abbr-row { line-height: 1.4; }
 .abbr-full { font-family: var(--gothic); font-weight: 700; }
 
 /* the sitting over all sets, at the top of the set list */

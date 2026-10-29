@@ -733,7 +733,7 @@ function show(name, opts) {
     // the stacks measure the cover over them, and the question its lines,
     // which have a size only when shown
     if (name === 'home') fitStacks($('shelf-boxes'));
-    if (name === 'quiz') fitPrompt();
+    if (name === 'quiz') { fitPrompt(); fitChoices(); }
   };
   if (document.startViewTransition && !reduceMotion() && S.screen && S.screen !== name) {
     document.documentElement.dataset.dir = (opts && opts.back) ? 'back' : 'forward';
@@ -1206,7 +1206,10 @@ function paintShelf(host, opts) {
  *  slanted lines. */
 function fitStacks(host) {
   const home = host.closest('.page-home');
+  // the stack rises behind whatever stands over the shelf: the goal, the
+  // title, a message, and the rows that lead to the other screens
   const over = home ? ['home-goal', 'home-status', 'home-title'].map($)
+    .concat([home.querySelector('.menu')])
     .filter((el) => el && el.textContent.trim() && el.offsetHeight) : [];
   const coverTop = home ? home.querySelector('.cover').getBoundingClientRect().top : 0;
   for (const st of host.querySelectorAll('.stack')) {
@@ -1227,6 +1230,38 @@ function fitStacks(host) {
   }
 }
 addEventListener('resize', () => { if (S.screen === 'home') fitStacks($('shelf-boxes')); });
+
+/** Turning the phone changes the room the answer was measured in. The height
+ *  fixed at the answer would cut the explanation off, so it is measured again
+ *  and the explanation moves below the choices when it no longer fits. */
+function refitAnswered() {
+  const area = $('q-area');
+  if (area.classList.contains('spill')) return;
+  area.style.height = '';
+  const roomH = area.getBoundingClientRect().height;
+  if (roomH < 200 || area.scrollHeight > area.clientHeight + 4) {
+    $('q-verdict').append($('v-aside'), $('v-src'));
+    $('v-more').hidden = true;
+    $('q-page').appendChild($('q-verdict'));
+    $('v-cue').hidden = false;
+    area.classList.remove('low');
+    area.classList.add('spill');
+  } else {
+    area.style.height = `${roomH}px`;
+  }
+  fitDock();
+}
+// The address bar of the browser slides in and out while reading, which fires
+// resize over and over with the same width. Only a turn of the phone changes
+// the width, and only then is the question laid out again.
+let lastWidth = innerWidth;
+addEventListener('resize', () => {
+  if (innerWidth === lastWidth) return;
+  lastWidth = innerWidth;
+  if (S.screen !== 'quiz') return;
+  if ($('q-area').classList.contains('answered')) refitAnswered();
+  else { fitPrompt(); fitChoices(); }
+});
 
 // The boxes from one day on hold what has been answered right more than once
 // at a spacing; the bracket over them counts those, rather than a word like
@@ -1335,7 +1370,10 @@ function paintHome() {
   applyTheme();
   rememberWords();
   $('home-kicker').textContent = fmtDeadline() || `${b.questions.length}問の学習セット`;
-  phrase($('home-title'), b.cover_title || b.short_title || b.title);
+  const coverTitle = b.cover_title || b.short_title || b.title || '';
+  phrase($('home-title'), coverTitle);
+  // the vertical title is bounded by how many characters it has
+  $('home-title').style.setProperty('--len', Math.max(3, coverTitle.length));
   phrase($('home-goal'), b.goal || '');
   $('btn-browse').textContent = `${b.item_label || '項目'}の一覧`;
   $('btn-sets').hidden = S.mode !== 'remote';
@@ -1450,7 +1488,11 @@ function paintTicks() {
     else host.insertBefore(h('li', { class: cls.join(' ') }), host.querySelector('.tick-extra'));
   });
   const cur = s.queue[s.idx];
-  $('q-count').textContent = cur && cur.again ? 'もう一度' : `${firstDone}/${s.firstN}`;
+  // over all the sets the count runs through, so it does not fall back to 1
+  // each time the sitting moves to the next set
+  const done = S.tour ? S.tour.total + firstDone : firstDone;
+  const all = S.tour ? Math.max(S.tour.plan || 0, done) : s.firstN;
+  $('q-count').textContent = cur && cur.again ? 'もう一度' : `${done}/${all}`;
 }
 
 /** A question of three lines or less at the large size is set large, so it
@@ -1461,6 +1503,9 @@ function fitPrompt() {
   const p = $('q-prompt');
   p.classList.add('big');
   if (!p.offsetHeight) return;
+  // a question already carrying a label, a figure or a list of abbreviations
+  // keeps the usual size, so the explanation still has room after the answer
+  if ($('q-area').classList.contains('with-fig')) { p.classList.remove('big'); return; }
   const line = parseFloat(getComputedStyle(p).lineHeight);
   const scrolls = document.documentElement.scrollHeight > innerHeight + 1;
   if (p.offsetHeight > line * 3 + 2 || scrolls) p.classList.remove('big');
@@ -1497,6 +1542,10 @@ function paintQuestion() {
   paintMap($('v-map'), null, false);
   const area = $('q-area');
   area.classList.remove('answered', 'spill', 'low');
+  // a label or a figure under the question takes the room the shelf would
+  // have had, so the shelf draws small and the four choices stay in view
+  area.classList.toggle('with-fig', !$('q-label').hidden || !$('q-map').hidden
+    || !$('q-chord').hidden || !$('q-abbr').hidden);
   clearTimeout(S.moveTimer);
   $('q-page').classList.remove('moving');
   $('q-stage').style.top = '';
@@ -1550,7 +1599,21 @@ function paintQuestion() {
   $('q-page').classList.remove('answered');
   // the question's size, once the rest of the screen is in place
   fitPrompt();
+  fitChoices();
   s.shownAt = Date.now();
+}
+
+/** All four choices have to be readable before the finger moves. A label, a
+ *  figure or a long set of choices can push the last one under the bar, and
+ *  then the shelf gives up the rest of its room. A hidden screen measures as
+ *  nothing, so show() asks again once the quiz is up. */
+function fitChoices() {
+  const area = $('q-area');
+  area.classList.remove('tight');
+  const last = $('q-choices').lastElementChild;
+  if (!last || !area.offsetHeight || area.classList.contains('answered')) return;
+  const dockTop = innerHeight - ($('q-dock').getBoundingClientRect().height || 0);
+  if (last.getBoundingClientRect().bottom > dockTop) area.classList.add('tight');
 }
 
 /** What a choice really is, said under it once the answer is in. */
@@ -1601,6 +1664,9 @@ function answer(opt, btn) {
   // ones new in it
   $('q-abbr').hidden = true;
   const area = $('q-area');
+  // the shelf drew small to keep the four choices in view; the answer is read
+  // with the card moving between the boxes, so it takes its room back here
+  area.classList.remove('with-fig', 'tight');
   // where the shelf stood before the answer, so it can stay there a moment
   const stageTop0 = $('q-stage').offsetTop;
   const roomH = area.getBoundingClientRect().height;
@@ -2421,7 +2487,7 @@ async function startTour() {
   } catch (e) { /* the list kept from last time */ }
   const parts = planTour(sets);
   if (!parts.length) return;
-  S.tour = { parts, i: 0, carry: 0, total: 0, sets: 0 };
+  S.tour = { parts, i: 0, carry: 0, total: 0, sets: 0, plan: parts.reduce((n, p) => n + p.n, 0) };
   runTourPart();
 }
 
@@ -2503,6 +2569,8 @@ function paintSetup() {
   $('in-repo').value = cfg.repo || '';
   $('in-token').value = cfg.token || '';
   const pick = !cfg.domain;
+  // the way back exists only once there is a set to go back to
+  $('setup-bar').hidden = !(S.bank && S.cfg && S.cfg.domain);
   $('setup-next').hidden = !pick;
   $('btn-save-setup').textContent = pick ? '保存して学習セットを選ぶ' : '保存して読み込む';
   // a page added to the home screen keeps its own storage, apart from the
@@ -2705,6 +2773,7 @@ function wire() {
     paintSetup();
     show('setup');
   });
+  $('btn-setup-back').addEventListener('click', goHome);
 
   // Keys 1 to 4 answer, Enter goes on. For a laptop; the phone never sees it.
   document.addEventListener('keydown', (e) => {

@@ -14,7 +14,7 @@
 <link rel="icon" href="icon-192.png">
 <link rel="preload" href="line-seed-jp-400.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="line-seed-jp-700.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="app.css?v=ae936116">
+<link rel="stylesheet" href="app.css?v=47ee3876">
 </head>
 <body>
 
@@ -39,6 +39,13 @@
 
   <!-- 設定 -->
   <section class="screen" id="screen-setup" aria-labelledby="setup-title">
+    <header class="bar" id="setup-bar" hidden>
+      <button class="icon" id="btn-setup-back" type="button" aria-label="戻る">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+      </button>
+      <span class="bar-title">設定</span>
+      <span class="icon-spacer"></span>
+    </header>
     <div class="page">
       <header class="head">
         <h1 class="title" id="setup-title">記録の置き場所</h1>
@@ -80,21 +87,21 @@
         </div>
         <h1 class="cover-title" id="home-title"></h1>
       </header>
-      <figure class="shelf" id="home-shelf">
-        <div class="shelf-boxes" id="shelf-boxes"></div>
-        <p class="shelf-bracket" id="shelf-bracket"><span id="bracket-label"></span></p>
-      </figure>
-      <p class="home-plan" id="home-plan" hidden><span class="home-plan-kicker">今日の残り</span><span id="home-plan-text"></span></p>
-      <p class="home-plan-note" id="home-plan-note" hidden></p>
+      <p class="status" id="home-msg" role="status"></p>
+      <button class="link link-send" id="btn-send" type="button" hidden>今すぐ送る</button>
       <nav class="menu" aria-label="ほかの画面">
         <button class="row" id="btn-primer" type="button" hidden><span>考え方を読む</span></button>
         <button class="row" id="btn-browse" type="button"><span>一覧</span></button>
         <button class="row" id="btn-sets" type="button" hidden><span>学習セット</span></button>
         <button class="row" id="btn-settings" type="button"><span>設定</span></button>
       </nav>
+      <figure class="shelf" id="home-shelf">
+        <div class="shelf-boxes" id="shelf-boxes"></div>
+        <p class="shelf-bracket" id="shelf-bracket"><span id="bracket-label"></span></p>
+      </figure>
+      <p class="home-plan" id="home-plan" hidden><span class="home-plan-kicker">今日の残り</span><span id="home-plan-text"></span></p>
+      <p class="home-plan-note" id="home-plan-note" hidden></p>
 
-      <p class="status" id="home-msg" role="status"></p>
-      <button class="link link-send" id="btn-send" type="button" hidden>今すぐ送る</button>
     </div>
     <footer class="dock">
       <div class="done" id="home-done" hidden>
@@ -265,9 +272,9 @@
 </main>
 
 <noscript><p style="padding:24px">このページは JavaScript が必要です。</p></noscript>
-<script src="schedule.js?v=ae936116"></script>
-<script src="budoux-ja.js?v=ae936116"></script>
-<script src="japan-map.js?v=ae936116"></script>
-<script src="app.js?v=ae936116"></script>
+<script src="schedule.js?v=47ee3876"></script>
+<script src="budoux-ja.js?v=47ee3876"></script>
+<script src="japan-map.js?v=47ee3876"></script>
+<script src="app.js?v=47ee3876"></script>
 </body>
 </html>
