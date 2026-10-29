@@ -202,20 +202,117 @@ function writeLS(key, value) {
   }
 }
 
-/** Keep a set's questions on the device for opening offline. Only the open
- *  set's are kept: twelve sets of questions run past the few megabytes the
- *  browser gives an origin, and once that is full the answers would not be
- *  saved either. Another set's questions come again from the repository. */
-function saveBank(domain, bank) {
+/* ---------- the questions on the device ----------
+ *
+ * The sets together are about seven megabytes of questions, more than the few
+ * an origin gets in localStorage, and a full store would stop the answers
+ * being saved as well. They live in IndexedDB instead, which is measured
+ * against the disk rather than a few megabytes, so every set opened once
+ * stays on the device and a sitting over all the sets can go on without the
+ * network. Everything else is small and stays in localStorage.
+ */
+const DB_NAME = 'oboeru';
+const DB_STORE = 'bank';
+let dbPromise = null;
+
+function openDB() {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve) => {
+    let req;
+    try {
+      req = indexedDB.open(DB_NAME, 1);
+    } catch (e) {
+      resolve(null);                        // blocked, as in a private window
+      return;
+    }
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(DB_STORE)) req.result.createObjectStore(DB_STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => resolve(null);
+    req.onblocked = () => resolve(null);
+  });
+  return dbPromise;
+}
+
+function dbRun(mode, run) {
+  return openDB().then((db) => {
+    if (!db) return null;
+    return new Promise((resolve) => {
+      let tx;
+      try {
+        tx = db.transaction(DB_STORE, mode);
+      } catch (e) {
+        resolve(null);
+        return;
+      }
+      const req = run(tx.objectStore(DB_STORE));
+      tx.oncomplete = () => resolve(req ? req.result : true);
+      tx.onerror = () => resolve(null);
+      tx.onabort = () => resolve(null);
+    });
+  }).catch(() => null);
+}
+
+const dbGet = (key) => dbRun('readonly', (st) => st.get(key));
+const dbPut = (key, value) => dbRun('readwrite', (st) => st.put(value, key));
+
+/** Keep a set's questions on the device for opening it again without the
+ *  network. Every set opened is kept, not only the one in front. */
+async function saveBank(domain, bank) {
+  // the ids alone are small, and let the set list count another set's reviews
+  writeLS(LS.qids + domain, (bank.questions || []).map((q) => q.id));
+  const ok = await dbPut(domain, bank);
+  if (ok !== null) return true;
+  // no IndexedDB here: fall back to the old shelf of one, so the set in front
+  // still opens without the network
   try {
     for (let i = localStorage.length - 1; i >= 0; i -= 1) {
       const k = localStorage.key(i);
       if (k && k.startsWith(LS.bank) && k !== LS.bank + domain) localStorage.removeItem(k);
     }
   } catch (e) { /* storage blocked: nothing to clear */ }
-  // the ids alone are small, and let the set list count another set's reviews
-  writeLS(LS.qids + domain, (bank.questions || []).map((q) => q.id));
   return writeLS(LS.bank + domain, bank);
+}
+
+/** Questions left in localStorage by an earlier version move across once and
+ *  give their room back. Asking to keep the store is a hint, not a question
+ *  put to the reader: the browser decides it quietly. */
+async function adoptOldBanks() {
+  let keys = [];
+  try {
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(LS.bank)) keys.push(k);
+    }
+  } catch (e) { /* storage blocked: nothing to move */ }
+  for (const k of keys) {
+    const bank = readLS(k, null);
+    if (!bank) continue;
+    const moved = await dbPut(k.slice(LS.bank.length), bank);
+    if (moved === null) return;             // no IndexedDB: leave them be
+    try { localStorage.removeItem(k); } catch (e) { /* blocked */ }
+  }
+  try {
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
+  } catch (e) { /* not offered here */ }
+}
+
+/** The questions kept for a set, from IndexedDB or, for a device that saved
+ *  them before they moved there, from localStorage. */
+async function loadBank(domain) {
+  const held = await dbGet(domain);
+  if (held) return held;
+  const old = readLS(LS.bank + domain, null);
+  if (old) {
+    // move it across once, and give the room in localStorage back
+    const moved = await dbPut(domain, old);
+    if (moved !== null) {
+      try { localStorage.removeItem(LS.bank + domain); } catch (e) { /* blocked */ }
+    }
+    return old;
+  }
+  return null;
 }
 
 /** How many reviews are waiting in a set now, from the answers this device
@@ -2597,7 +2694,7 @@ async function loadAndShow(opts) {
   // within a sitting over all sets the next part's questions follow at once,
   // so the home is not shown between them
   const quiet = !!(opts && opts.quiet);
-  const cached = readLS(LS.bank + S.cfg.domain, null);
+  const cached = await loadBank(S.cfg.domain);
   if (cached) {
     S.bank = cached;
     S.events = readLS(LS.events + S.cfg.domain, []) || [];
@@ -2610,7 +2707,7 @@ async function loadAndShow(opts) {
   try {
     const bank = await fetchBank();
     S.bank = bank;
-    saveBank(S.cfg.domain, bank);
+    await saveBank(S.cfg.domain, bank);
     S.events = readLS(LS.events + S.cfg.domain, []) || [];
     S.dirty = !!readLS(LS.dirty + S.cfg.domain, false);
     // with nothing waiting, every answer here has been sent
@@ -2638,6 +2735,7 @@ async function loadAndShow(opts) {
 async function boot() {
   document.getElementById('app').hidden = false;
   S.cfg = readLS(LS.cfg, null);
+  await adoptOldBanks();
 
   // A bank.json sitting next to the page means local use: no token, no sync.
   if (!S.cfg || !S.cfg.token) {
@@ -2648,7 +2746,7 @@ async function boot() {
         S.mode = 'local';
         S.cfg = { repo: '', token: '', domain: bank.domain || 'local' };
         S.bank = bank;
-        saveBank(S.cfg.domain, bank);
+        await saveBank(S.cfg.domain, bank);
         S.events = readLS(LS.events + S.cfg.domain, []) || [];
         rebuildState();
         paintHome();
